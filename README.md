@@ -1,4 +1,4 @@
-> **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has repo access, the user's PC machine id and local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Reply to the user in short Korean (해요체).
+> **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
 # BongThumbLive 2.1 (Unreal Engine 5.7 editor plugin)
 
