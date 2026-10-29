@@ -808,6 +808,14 @@ UBongThumbLiveRenderer::UBongThumbLiveRenderer(const FObjectInitializer& ObjectI
 
 bool UBongThumbLiveRenderer::CanVisualizeAsset(UObject* Object)
 {
+	// The tile widget of an UNLOADED anim asks this for the class default object (SAssetThumbnail::ShouldRender).
+	// With the frame cache on, unloaded anims can play from cached frames, so their tile must be allowed to show
+	// the pool texture; the cache only announces tiles it actually has frames for. Nothing renders the CDO itself.
+	if (Object && Object->HasAnyFlags(RF_ClassDefaultObject))
+	{
+		const UBongThumbLiveSettings* S = GetDefault<UBongThumbLiveSettings>();
+		return S->bEnabled && S->bUseFrameCache && FBongThumbLiveModule::IsKindEnabled(EBongThumbKind::Animation);
+	}
 	// A complete cached animation plays from its frames: no preview mesh needed (and none is loaded for it).
 	if (FBongThumbCache* Cache = FBongThumbCache::GetPtr())
 	{
@@ -846,7 +854,7 @@ EThumbnailRenderFrequency UBongThumbLiveRenderer::GetThumbnailRenderFrequency(UO
 void UBongThumbLiveRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Width, uint32 Height, FRenderTarget* RenderTarget, FCanvas* Canvas, bool bAdditionalViewFamily)
 {
 	UAnimSequenceBase* Anim = Cast<UAnimSequenceBase>(Object);
-	if (!Anim || !RenderTarget || Width == 0 || Height == 0)
+	if (!Anim || !RenderTarget || Width == 0 || Height == 0 || Anim->HasAnyFlags(RF_ClassDefaultObject))
 	{
 		return;
 	}

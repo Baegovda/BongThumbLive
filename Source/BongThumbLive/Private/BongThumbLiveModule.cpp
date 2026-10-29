@@ -558,6 +558,10 @@ void FBongThumbLiveModule::HookThumbnailPool()
 		if (GetKind(AssetData) != EBongThumbKind::None)
 		{
 			++PoolRenderFailures; // the pool showed the static fallback for a live kind
+			if (GetKind(AssetData) == EBongThumbKind::Animation)
+			{
+				AnnounceNeeded.Add(AssetData.GetSoftObjectPath()); // shown again from cached frames (see TickCache)
+			}
 		}
 		OnPoolThumbnail(AssetData);
 	});
@@ -580,6 +584,10 @@ void FBongThumbLiveModule::OnPoolThumbnail(const FAssetData& AssetData)
 {
 	// The pool draws a tile for every asset the Content Browser actually shows (folder view, recursive filter
 	// results, search, content drawer, other browsers). Unloaded supported assets cannot animate: load them.
+	if (bAnnouncing)
+	{
+		return; // our own re-sent event (nothing was drawn into the tile; no auto-load for cache-played tiles)
+	}
 	if (FBongThumbCache* Cache = FBongThumbCache::GetPtr())
 	{
 		Cache->OnPoolRendered(AssetData.GetSoftObjectPath()); // the pool overwrote the tile: push our frame again
@@ -761,12 +769,25 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 	{
 		LastAssetViewScanTime = Now;
 		AssetViews.Reset();
-		for (const TSharedRef<SWindow>& Window : FSlateApplication::Get().GetInteractiveTopLevelWindows())
+		// Floating (undocked) Content Browser tabs live in CHILD windows of the main window, which are neither in
+		// the top-level window list nor in the main window's widget tree: walk the child windows too.
+		TFunction<void(const TSharedRef<SWindow>&, int32)> VisitWindow = [&](const TSharedRef<SWindow>& Window, int32 Depth)
 		{
 			if (Window->IsVisible() && !Window->IsWindowMinimized())
 			{
 				BongCollectAssetViews(Window, AssetViews, 0);
 			}
+			if (Depth < 8)
+			{
+				for (const TSharedRef<SWindow>& Child : Window->GetChildWindows())
+				{
+					VisitWindow(Child, Depth + 1);
+				}
+			}
+		};
+		for (const TSharedRef<SWindow>& Window : FSlateApplication::Get().GetInteractiveTopLevelWindows())
+		{
+			VisitWindow(Window, 0);
 		}
 	}
 	TSet<FString> Tags;
@@ -980,8 +1001,8 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 				VisibleTileCount, LastLiveCount, S->MaxRefreshPerTickCap, SkippedNotRefreshable, PoolRenderFailures, *UBongThumbLiveRenderer::GetCacheStats(),
 				HoveredAsset.IsValid() ? *HoveredAsset->GetName() : TEXT(""), S->HoverFPS, (int32)S->Mode, Tracked.Num(),
 				PerKind[1], PerKind[2], PerKind[3], PerKind[4], UBongThumbLiveFXRenderer::GetNumLiveScenes());
-			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: liveActive=%d visibleViews=%d visibleAnimTiles=%d FrameBudgetMs=%.1f avgDrawMs=%.2f renderMsThisFrame=%.2f | %s"),
-				LiveState, AssetViews.Num(), VisibleAnimPaths.Num(), GetFrameBudgetMs(), GBongAvgDrawMs, GetRenderMsThisFrame(), *(UBongThumbLiveRenderer::GetResolveStats() + TEXT(" | ") + GetRenderGovernorStats()));
+			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: liveActive=%d visibleViews=%d visibleAnimTiles=%d tilesAnnounced=%lld announcePending=%d newTileToShown(n=%lld avg=%.2fs max=%.2fs waiting=%d) FrameBudgetMs=%.1f avgDrawMs=%.2f renderMsThisFrame=%.2f | %s"),
+				LiveState, AssetViews.Num(), VisibleAnimPaths.Num(), TilesAnnounced, AnnounceNeeded.Num(), AnnounceLatencyCount, AnnounceLatencyCount ? AnnounceLatencySum / AnnounceLatencyCount : 0.0, AnnounceLatencyMax, VisibleSince.Num(), GetFrameBudgetMs(), GBongAvgDrawMs, GetRenderMsThisFrame(), *(UBongThumbLiveRenderer::GetResolveStats() + TEXT(" | ") + GetRenderGovernorStats()));
 			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: memory: editor %.1f GB (limit %.1f GB), free %.1f GB (minimum %d GB), pressure=%d (events %d), pendingAnimLoads=%d"),
 				LastUsedGB, LastCapGB, LastFreeGB, S->MinFreeMemoryGB, bMemoryPressure ? 1 : 0, PressureEvents, PendingAnimPaths.Num());
 		}),
@@ -1084,8 +1105,8 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 
 	ConsoleObjects.Add(CM.RegisterConsoleCommand(
 		TEXT("BongThumbLive.CaptureEditorWindow"),
-		TEXT("Debug: save a PNG of the active (or main) editor window. Usage: BongThumbLive.CaptureEditorWindow C:/path/shot.png"),
-		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		TEXT("Debug: save a PNG of the window showing a Content Browser (else the active or main editor window). Usage: BongThumbLive.CaptureEditorWindow C:/path/shot.png"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([this](const TArray<FString>& Args)
 		{
 			FString Path = FString::Join(Args, TEXT(" ")).TrimStartAndEnd().TrimQuotes();
 			if (Path.IsEmpty())
@@ -1096,7 +1117,22 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 			{
 				return;
 			}
-			TSharedPtr<SWindow> Window = FSlateApplication::Get().GetActiveTopLevelRegularWindow();
+			TSharedPtr<SWindow> Window;
+			for (const TWeakPtr<SWidget>& Weak : AssetViews)
+			{
+				if (TSharedPtr<SWidget> View = Weak.Pin())
+				{
+					Window = FSlateApplication::Get().FindWidgetWindow(View.ToSharedRef());
+					if (Window.IsValid())
+					{
+						break;
+					}
+				}
+			}
+			if (!Window.IsValid())
+			{
+				Window = FSlateApplication::Get().GetActiveTopLevelRegularWindow();
+			}
 			if (!Window.IsValid())
 			{
 				const TArray<TSharedRef<SWindow>>& Windows = FSlateApplication::Get().GetTopLevelWindows();
@@ -1459,6 +1495,73 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 			BongOwned::Touch(FName(*Path.GetLongPackageName()), Now);
 		}
 	}
+	// Tiles that show the class icon although the cache has frames for them: tell their tile widgets the pool
+	// texture is valid (the cache pushes its frames into that texture). Newly visible tiles (scrolling, recycled
+	// widgets, folder/filter change) and failed pool renders right away; every visible anim once per second as
+	// a safety net. Cheap: a delegate broadcast per tile, nothing is rendered or loaded.
+	if (bAnims && Settings->bUseFrameCache && Params.Pool.IsValid())
+	{
+		TSet<FSoftObjectPath> NowVisible;
+		NowVisible.Reserve(VisibleAnimPaths.Num());
+		const bool bSweep = Now - LastAnnounceSweep > 1.0;
+		if (bSweep)
+		{
+			LastAnnounceSweep = Now;
+		}
+		for (const FSoftObjectPath& Path : VisibleAnimPaths)
+		{
+			NowVisible.Add(Path);
+			if (!PrevVisibleAnims.Contains(Path))
+			{
+				AnnounceNeeded.Add(Path);
+				VisibleSince.Add(Path, Now);
+			}
+			else if (bSweep)
+			{
+				AnnounceNeeded.Add(Path);
+			}
+		}
+		PrevVisibleAnims = MoveTemp(NowVisible);
+		for (auto It = VisibleSince.CreateIterator(); It; ++It)
+		{
+			if (!PrevVisibleAnims.Contains(It.Key()))
+			{
+				It.RemoveCurrent();
+			}
+		}
+		for (auto It = AnnounceNeeded.CreateIterator(); It; ++It)
+		{
+			const FSoftObjectPath Path = *It;
+			if (!PrevVisibleAnims.Contains(Path))
+			{
+				VisibleSince.Remove(Path);
+				It.RemoveCurrent(); // off screen: announced again when it comes back
+				continue;
+			}
+			const FBongCacheEntry* Entry = Cache.Find(Path);
+			if (!Entry || Entry->NumValid <= 0)
+			{
+				continue; // nothing to show yet: keep waiting
+			}
+			FAssetData Data;
+			if (Cache.IsAnimPath(Path, &Data))
+			{
+				TGuardValue<bool> Guard(bAnnouncing, true);
+				Params.Pool->OnThumbnailRendered().Broadcast(Data);
+				++TilesAnnounced;
+			}
+			double Since = 0.0;
+			if (VisibleSince.RemoveAndCopyValue(Path, Since))
+			{
+				const double Latency = Now - Since; // tile appeared -> its tile shows cached frames
+				++AnnounceLatencyCount;
+				AnnounceLatencySum += Latency;
+				AnnounceLatencyMax = FMath::Max(AnnounceLatencyMax, Latency);
+			}
+			It.RemoveCurrent();
+		}
+	}
+
 	// Release what the plugin itself loaded once it is no longer needed (the key fix for the unbounded growth):
 	// animations as soon as their frames are cached (the cache plays them without the asset), preview meshes after
 	// 10 s without use, anything after 30 s off screen, everything under memory pressure.

@@ -191,6 +191,19 @@ private:
 
 	/** Animation tiles on screen (loaded or not) and the hovered tile's path (may be unloaded). */
 	TArray<FSoftObjectPath> VisibleAnimPaths;
+	// Tile "announce": the Content Browser tile widget only shows the pool texture (where the frame cache pushes its
+	// frames) after the pool reported a successful render for that asset. Anims without a saved package thumbnail,
+	// anims whose first pool render happened before they were renderable, and tiles created by scrolling get a
+	// failed/no render and would keep the class icon forever (until hovered). We re-send the rendered event for them.
+	TSet<FSoftObjectPath> AnnounceNeeded;
+	TSet<FSoftObjectPath> PrevVisibleAnims;
+	double LastAnnounceSweep = 0.0;
+	bool bAnnouncing = false;
+	int64 TilesAnnounced = 0;
+	TMap<FSoftObjectPath, double> VisibleSince; // newly visible anim tile -> time it appeared (latency stats)
+	int64 AnnounceLatencyCount = 0;
+	double AnnounceLatencySum = 0.0;
+	double AnnounceLatencyMax = 0.0;
 	FSoftObjectPath HoveredPath;
 	TMap<FString, FSoftObjectPath> TagPathCache;
 	/** Queued auto-load packages that are animations (they wait for the disk cache and may not need loading). */

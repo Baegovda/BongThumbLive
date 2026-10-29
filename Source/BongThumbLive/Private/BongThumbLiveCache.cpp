@@ -1528,6 +1528,8 @@ void FBongThumbCache::Tick(const FTickParams& Params)
 	}
 }
 
+static std::atomic<int32> GBongTileTexturesCreated{0};
+
 void FBongThumbCache::Push(const FTickParams& Params, const TSet<FSoftObjectPath>& Active)
 {
 	struct FCopy
@@ -1590,6 +1592,21 @@ void FBongThumbCache::Push(const FTickParams& Params, const TSet<FSoftObjectPath
 		for (const FCopy& Copy : Copies)
 		{
 			FRHITexture* DstTex = Copy.Dst->GetTypedResource().GetReference();
+			if (!DstTex && Copy.Atlas->Texture && Copy.Dst->GetWidth() > 0 && Copy.Dst->GetHeight() > 0)
+			{
+				// The pool never got a successful render for this tile (no saved package thumbnail, or it was not
+				// renderable when the pool tried): its texture has no GPU resource at all, so the tile stayed black or
+				// on the class icon. Give it one (render-targetable, like the pool's own render target) to push into.
+				// The pool replaces it with its render target if it renders the tile later.
+				const FRHITextureCreateDesc Desc = FRHITextureCreateDesc::Create2D(TEXT("BongThumbLive.TileTexture"),
+					(int32)Copy.Dst->GetWidth(), (int32)Copy.Dst->GetHeight(), PF_B8G8R8A8)
+					.SetFlags(ETextureCreateFlags::RenderTargetable | ETextureCreateFlags::ShaderResource)
+					.SetInitialState(ERHIAccess::SRVMask);
+				FTextureRHIRef NewTex = RHICmdList.CreateTexture(Desc);
+				Copy.Dst->SetRHIRef(NewTex, Copy.Dst->GetWidth(), Copy.Dst->GetHeight());
+				DstTex = NewTex.GetReference();
+				++GBongTileTexturesCreated;
+			}
 			if (!DstTex || !Copy.Atlas->Texture || DstTex->GetFormat() != PF_B8G8R8A8)
 			{
 				continue;
@@ -1705,10 +1722,10 @@ FString FBongThumbCache::GetStats() const
 		Frames += Pair.Value->NumValid;
 		FromDisk += Pair.Value->bFromDisk ? 1 : 0;
 	}
-	return FString::Printf(TEXT("memory cache: %s entries=%d (complete %d, from disk %d) frames=%lld GPU=%.1f MB (+cpu in flight %.1f MB) / %d MB, evictions=%lld, playing tiles=%d, pushed frames=%lld, draw hits=%lld, renders=%lld, notStored(compiling)=%lld, overBudget=%lld\n")
+	return FString::Printf(TEXT("memory cache: %s entries=%d (complete %d, from disk %d) frames=%lld GPU=%.1f MB (+cpu in flight %.1f MB) / %d MB, evictions=%lld, playing tiles=%d, pushed frames=%lld, draw hits=%lld, renders=%lld, notStored(compiling)=%lld, overBudget=%lld, tileTexturesCreated=%d\n")
 		TEXT("disk cache: %s %s files=%d %.1f / %d MB, hits=%lld misses=%lld stale=%lld writes=%lld writeFails=%lld loading=%d avgDecode=%.1f ms, folder=%s"),
 		S->bUseFrameCache ? TEXT("on") : TEXT("OFF"), Entries.Num(), Complete, FromDisk, Frames, MemBytes / (1024.0 * 1024.0), InFlightCpuBytes / (1024.0 * 1024.0),
-		S->CacheMemoryMB, Evictions, PushTiles.Num(), PushedFrames, DrawHits, Renders, NotStoredBusy, OverBudget,
+		S->CacheMemoryMB, Evictions, PushTiles.Num(), PushedFrames, DrawHits, Renders, NotStoredBusy, OverBudget, GBongTileTexturesCreated.load(),
 		S->bEnableDiskCache ? TEXT("on") : TEXT("OFF"), bIndexReady ? TEXT("ready") : TEXT("scanning"), Index.Num(), DiskBytes / (1024.0 * 1024.0), S->MaxDiskCacheMB,
 		DiskHits, DiskMisses, DiskStale, DiskWrites, DiskWriteFails, LoadsInFlight.Num() + PendingUploads.Num(),
 		DiskHits > 0 ? DiskDecodeMsTotal / DiskHits : 0.0, *GetCacheDir());
