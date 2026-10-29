@@ -57,6 +57,7 @@
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectHash.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/SViewport.h"
 
 DEFINE_LOG_CATEGORY(LogBongThumbLive);
 
@@ -711,7 +712,36 @@ static void BongCollectAssetViews(const TSharedRef<SWidget>& Widget, TArray<TWea
 	}
 }
 
-static void BongCollectTileTags(const TSharedRef<SWidget>& Widget, TSet<FString>& Out, int32 Depth)
+/** Sizes of the thumbnail viewports (SAssetThumbnail -> SViewport -> FAssetThumbnail) inside one tile widget. */
+static void BongCollectViewportSizes(const TSharedRef<SWidget>& Widget, TArray<FIntPoint, TInlineAllocator<2>>& Out, int32 Depth)
+{
+	if (Depth > 24)
+	{
+		return;
+	}
+	static const FName ViewportType(TEXT("SViewport"));
+	if (Widget->GetType() == ViewportType)
+	{
+		const TSharedPtr<ISlateViewport> Viewport = static_cast<SViewport&>(Widget.Get()).GetViewportInterface().Pin();
+		if (Viewport.IsValid())
+		{
+			const FIntPoint Size = Viewport->GetSize();
+			if (Size.X > 0 && Size.Y > 0)
+			{
+				Out.AddUnique(Size);
+			}
+		}
+		return;
+	}
+	FChildren* Children = Widget->GetChildren();
+	for (int32 i = 0; Children && i < Children->Num(); ++i)
+	{
+		BongCollectViewportSizes(Children->GetChildAt(i), Out, Depth + 1);
+	}
+}
+
+static void BongCollectTileTags(const TSharedRef<SWidget>& Widget, TSet<FString>& Out, int32 Depth,
+	TMap<FString, TArray<FIntPoint, TInlineAllocator<2>>>* OutSizes = nullptr)
 {
 	if (Depth > 64 || !Widget->GetVisibility().IsVisible())
 	{
@@ -723,13 +753,26 @@ static void BongCollectTileTags(const TSharedRef<SWidget>& Widget, TSet<FString>
 		if (TagString.StartsWith(TEXT("/")))
 		{
 			Out.Add(TagString);
+			if (OutSizes)
+			{
+				TArray<FIntPoint, TInlineAllocator<2>> Sizes;
+				BongCollectViewportSizes(Widget, Sizes, 0);
+				if (Sizes.Num() > 0)
+				{
+					TArray<FIntPoint, TInlineAllocator<2>>& Dst = OutSizes->FindOrAdd(TagString);
+					for (const FIntPoint& S : Sizes)
+					{
+						Dst.AddUnique(S);
+					}
+				}
+			}
 			return; // a tile: nothing more below
 		}
 	}
 	FChildren* Children = Widget->GetChildren();
 	for (int32 i = 0; Children && i < Children->Num(); ++i)
 	{
-		BongCollectTileTags(Children->GetChildAt(i), Out, Depth + 1);
+		BongCollectTileTags(Children->GetChildAt(i), Out, Depth + 1, OutSizes);
 	}
 }
 
@@ -791,6 +834,7 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 		}
 	}
 	TSet<FString> Tags;
+	TMap<FString, TArray<FIntPoint, TInlineAllocator<2>>> TagSizes;
 	for (int32 Index = AssetViews.Num() - 1; Index >= 0; --Index)
 	{
 		TSharedPtr<SWidget> View = AssetViews[Index].Pin();
@@ -801,12 +845,13 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 			AssetViews.RemoveAtSwap(Index);
 			continue;
 		}
-		BongCollectTileTags(View.ToSharedRef(), Tags, 0);
+		BongCollectTileTags(View.ToSharedRef(), Tags, 0, &TagSizes);
 	}
 	VisibleTileCount = Tags.Num();
 	VisibleTiles.Reset();
 	VisibleTileKeys.Reset();
 	VisibleAnimPaths.Reset();
+	VisibleTileSizes.Reset();
 	const bool bAnims = IsKindEnabled(EBongThumbKind::Animation);
 	FBongThumbCache& Cache = FBongThumbCache::Get();
 	for (const FString& Tag : Tags)
@@ -817,6 +862,10 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 			if (Cache.IsAnimPath(Path, nullptr))
 			{
 				VisibleAnimPaths.Add(Path); // loaded or not: cached frames play without loading the asset
+				if (const TArray<FIntPoint, TInlineAllocator<2>>* Sizes = TagSizes.Find(Tag))
+				{
+					VisibleTileSizes.Add(Path, *Sizes);
+				}
 			}
 		}
 		if (UObject* Obj = ResolveTileTag(Tag))
@@ -1483,6 +1532,10 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 		}
 	}
 	Params.bAllowFill = !bMemoryPressure;
+	if (Params.ActivePaths.Num() > 0)
+	{
+		Params.TileSizes = VisibleTileSizes;
+	}
 	const double LeftMs = FMath::Max(0.0, GetFrameBudgetMs() - GetRenderMsThisFrame());
 	Params.FillDeadline = FPlatformTime::Seconds() + LeftMs / 1000.0;
 	Cache.Tick(Params);

@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-30 03:40 KST (Asia/Seoul).
+Last update: 2026-10-30 04:35 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -190,3 +190,10 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 - Matching server `unreal-engine-mcp-server@0.5.30` installed in `%TEMP%\btl_mcp` (not 0.6.0: plugin/server versions must match). `btl_mcp_client.mjs` there spawns it over stdio, lists 23 tools; usage: `node btl_mcp_client.mjs <tool> '<json args>'`. Server itself verified.
 - Blocked: UE_VFX_57 editor launched twice (03:21, 03:27) and exited by itself within 1 min (clean LogExit, no crash), so port 8091 was never reachable. Suspect: another Grok bot (BongLodge, project `C:\Users\Revaptor_FX\BongLodge_testproj\BLTest.uproject`, logs runI/runM.log) kills UnrealEditor processes on this PC. Unconfirmed.
 - Rules: MCP is read-only for assets (no modify/save/delete tools). Never kill BLTest editors or their crash reporter; tell them apart via `Get-CimInstance Win32_Process` CommandLine. Read-only inside BongLodge_testproj.
+## Scrolled-in tiles frozen on first frame (DONE 2026-10-30 04:35 KST, pkg17 deployed)
+- User report (03:xx KST): tiles that appear after scrolling stay on their first frame until hovered.
+- **Root cause (measured):** the pool keys tile textures by (asset, width, height). SAssetView creates a tile's FAssetThumbnail at 256 when the tile widget is generated first, but at its current thumbnail size (160 in the new-style CB) when the relevancy pass prefetched it (offscreen items = tiles that appear by scrolling; `SAssetView::AddItemToNewThumbnailRelevancyMap`). `FBongThumbCache::Push` always pushed into a fixed 256x256 FAssetThumbnail, i.e. a different pool texture than the 160x160 one those tiles display. Hover worked because the pool then renders the real 160 texture (realtime) via our renderer.
+- **Fix (v2.3 + pkg17):** Module `UpdateVisibleTiles` reads each tile's SViewport -> ISlateViewport::GetSize() (`BongCollectViewportSizes`) into `VisibleTileSizes`; passed as `FTickParams::TileSizes`. Push keeps one FPushTarget (thumb + LastPushed + LastRefresh) per displayed size (fallback 256). Status shows `pushTargetSizes=WxH:count`.
+- **Measurement** (`Tools/btl_scroll_test.py` + `btl_scroll_run.ps1 -Tag X` + `btl_diff.py X`; pairs of shots 0.3 s apart, count of tile-sized changed blobs, /Game/SM2_Work, 27 anim tiles at bottom): before1 (pkg16) after scroll-to-bottom 10-13 moving tiles (top view 24); after1 (pkg17) 18-24 moving at bottom, 24-27 at top. Status after1: `pushTargetSizes=256x256:45,160x160:24`. Remaining still tiles = near-static idle/aim poses and hologram_planet (stock icon, intended).
+- Backups: source `BongThumbLiveCache.h.bak2`, `BongThumbLiveCache.cpp.bak4`, `BongThumbLiveModule.h.bak5`, `BongThumbLiveModule.cpp.bak7`; binaries `.bak14` = pkg16. Shots: PC `%TEMP%\btl_shots\scr_before1_*`, `scr_after1_*`, `diff_*`.
+- Next: user confirms by scrolling in their own browser; no release unless asked.

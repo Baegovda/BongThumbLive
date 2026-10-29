@@ -191,6 +191,8 @@ private:
 
 	/** Animation tiles on screen (loaded or not) and the hovered tile's path (may be unloaded). */
 	TArray<FSoftObjectPath> VisibleAnimPaths;
+	/** Pool thumbnail size(s) of each visible tile's viewport (what the tile widget really displays). */
+	TMap<FSoftObjectPath, TArray<FIntPoint, TInlineAllocator<2>>> VisibleTileSizes;
 	// Tile "announce": the Content Browser tile widget only shows the pool texture (where the frame cache pushes its
 	// frames) after the pool reported a successful render for that asset. Anims without a saved package thumbnail,
 	// anims whose first pool render happened before they were renderable, and tiles created by scrolling get a

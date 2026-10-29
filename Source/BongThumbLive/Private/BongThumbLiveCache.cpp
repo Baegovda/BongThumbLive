@@ -615,7 +615,7 @@ void FBongThumbCache::DropEntry(const FSoftObjectPath& Path)
 	}
 	if (FPushTile* Tile = PushTiles.Find(Path))
 	{
-		Tile->LastPushed = INDEX_NONE;
+		Tile->ResetPushed();
 	}
 	if (FillTargetPath == Path)
 	{
@@ -794,7 +794,7 @@ void FBongThumbCache::ClearMemory()
 	FillTargetPath.Reset();
 	for (TPair<FSoftObjectPath, FPushTile>& Pair : PushTiles)
 	{
-		Pair.Value.LastPushed = INDEX_NONE;
+		Pair.Value.ResetPushed();
 	}
 	DiskFailed.Reset();
 	MissCounted.Reset();
@@ -1404,7 +1404,7 @@ void FBongThumbCache::OnPoolRendered(const FSoftObjectPath& Path)
 {
 	if (FPushTile* Tile = PushTiles.Find(Path))
 	{
-		Tile->LastPushed = INDEX_NONE;
+		Tile->ResetPushed();
 	}
 }
 
@@ -1551,14 +1551,25 @@ void FBongThumbCache::Push(const FTickParams& Params, const TSet<FSoftObjectPath
 		}
 		FPushTile& Tile = PushTiles.FindOrAdd(Path);
 		Tile.LastActive = Now;
-		if (!Tile.Thumb.IsValid())
+		// Push into the pool texture(s) the tile widgets really show. The pool keys textures by (asset, size), and the
+		// Content Browser creates tile thumbnails either at 256 (tile widget generated first) or at its current
+		// thumbnail size (thumbnails prefetched by the relevancy pass, i.e. tiles that appear by scrolling). Pushing
+		// only into a fixed 256 texture left scrolled-in tiles frozen on the pool's first render until hovered.
+		TArray<FIntPoint, TInlineAllocator<2>> Sizes;
+		if (const TArray<FIntPoint, TInlineAllocator<2>>* Found = Params.TileSizes.Find(Path))
 		{
-			FAssetData Data;
-			if (!IsAnimPath(Path, &Data))
+			Sizes = *Found;
+		}
+		if (Sizes.IsEmpty())
+		{
+			Sizes.Add(FIntPoint(TileSize, TileSize)); // hovered tile outside the scanned views, or no viewport found
+		}
+		for (int32 t = Tile.Targets.Num() - 1; t >= 0; --t)
+		{
+			if (!Tile.Targets[t].Thumb.IsValid() || !Sizes.Contains(Tile.Targets[t].Thumb->GetSize()))
 			{
-				continue;
+				Tile.Targets.RemoveAtSwap(t);
 			}
-			Tile.Thumb = MakeShared<FAssetThumbnail>(Data, TileSize, TileSize, Params.Pool);
 		}
 		const bool bHovered = Path == Params.Hovered;
 		int32 Frame = E->FrameIndexAt((float)BongLoopTime(E->Length, bHovered));
@@ -1566,41 +1577,60 @@ void FBongThumbCache::Push(const FTickParams& Params, const TSet<FSoftObjectPath
 		{
 			Frame = E->NearestValid(Frame);
 		}
-		if (Frame == INDEX_NONE || Frame == Tile.LastPushed)
+		if (Frame == INDEX_NONE)
 		{
 			continue;
 		}
-		FSlateTexture2DRHIRef* Dst = static_cast<FSlateTexture2DRHIRef*>(Tile.Thumb->GetViewportRenderTargetTexture());
-		if (!Dst)
+		for (const FIntPoint& Size : Sizes)
 		{
-			// No GPU texture yet: the pool never rendered this tile successfully (e.g. it tried while the asset was
-			// unloaded and had no saved thumbnail, or before a preview mesh was known). Without a pool render the tile
-			// keeps the class icon (or stays black) forever and only a mouse hover fixed it. Now that the cache has
-			// frames, the renderer can serve them, so ask the pool to render the tile again (asset loaded), or load
-			// the asset first (read-only async load; the pool re-renders tiles of freshly loaded assets).
-			const FAssetData& Data = Tile.Thumb->GetAssetData();
-			if (Now - Tile.LastRefresh >= 1.0)
+			FPushTarget* Target = Tile.Targets.FindByPredicate([&](const FPushTarget& T) { return T.Thumb->GetSize() == Size; });
+			if (!Target)
 			{
-				Tile.LastRefresh = Now;
-				if (Data.IsAssetLoaded())
+				FAssetData Data;
+				if (!IsAnimPath(Path, &Data) || Size.X <= 0 || Size.Y <= 0 || Size.X > 1024 || Size.Y > 1024)
 				{
-					Params.Pool->RefreshThumbnail(Tile.Thumb);
-					++TileRefreshes;
+					continue;
 				}
-				else if (!Tile.bLoadRequested)
-				{
-					Tile.bLoadRequested = true;
-					LoadPackageAsync(Data.PackageName.ToString());
-					++TileLoads;
-				}
+				Target = &Tile.Targets.AddDefaulted_GetRef();
+				Target->Thumb = MakeShared<FAssetThumbnail>(Data, Size.X, Size.Y, Params.Pool);
+				++PushSizeCounts.FindOrAdd(Size);
 			}
-			continue;
+			if (Frame == Target->LastPushed)
+			{
+				continue;
+			}
+			FSlateTexture2DRHIRef* Dst = static_cast<FSlateTexture2DRHIRef*>(Target->Thumb->GetViewportRenderTargetTexture());
+			if (!Dst)
+			{
+				// No GPU texture yet: the pool never rendered this tile successfully (e.g. it tried while the asset was
+				// unloaded and had no saved thumbnail, or before a preview mesh was known). Without a pool render the tile
+				// keeps the class icon (or stays black) forever and only a mouse hover fixed it. Now that the cache has
+				// frames, the renderer can serve them, so ask the pool to render the tile again (asset loaded), or load
+				// the asset first (read-only async load; the pool re-renders tiles of freshly loaded assets).
+				const FAssetData& Data = Target->Thumb->GetAssetData();
+				if (Now - Target->LastRefresh >= 1.0)
+				{
+					Target->LastRefresh = Now;
+					if (Data.IsAssetLoaded())
+					{
+						Params.Pool->RefreshThumbnail(Target->Thumb);
+						++TileRefreshes;
+					}
+					else if (!Tile.bLoadRequested)
+					{
+						Tile.bLoadRequested = true;
+						LoadPackageAsync(Data.PackageName.ToString());
+						++TileLoads;
+					}
+				}
+				continue;
+			}
+			Target->LastPushed = Frame;
+			Copies.Add({ E->Atlas, E->CellRect(Frame), Dst });
 		}
-		Tile.LastPushed = Frame;
 		E->LastShown = Frame;
 		E->LastUse = Now;
 		TouchIndex(*E, Now);
-		Copies.Add({ E->Atlas, E->CellRect(Frame), Dst });
 	}
 	if (Copies.IsEmpty())
 	{
@@ -1745,10 +1775,15 @@ FString FBongThumbCache::GetStats() const
 		Frames += Pair.Value->NumValid;
 		FromDisk += Pair.Value->bFromDisk ? 1 : 0;
 	}
-	return FString::Printf(TEXT("memory cache: %s entries=%d (complete %d, from disk %d) frames=%lld GPU=%.1f MB (+cpu in flight %.1f MB) / %d MB, evictions=%lld, playing tiles=%d, pushed frames=%lld, draw hits=%lld, renders=%lld, notStored(compiling)=%lld, overBudget=%lld, tileTexturesCreated=%d, tileRefreshes=%d, tileLoads=%d\n")
+	FString SizesStr;
+	for (const TPair<FIntPoint, int32>& Pair : PushSizeCounts)
+	{
+		SizesStr += FString::Printf(TEXT("%s%dx%d:%d"), SizesStr.IsEmpty() ? TEXT("") : TEXT(","), Pair.Key.X, Pair.Key.Y, Pair.Value);
+	}
+	return FString::Printf(TEXT("memory cache: %s entries=%d (complete %d, from disk %d) frames=%lld GPU=%.1f MB (+cpu in flight %.1f MB) / %d MB, evictions=%lld, playing tiles=%d, pushed frames=%lld, draw hits=%lld, renders=%lld, notStored(compiling)=%lld, overBudget=%lld, tileTexturesCreated=%d, tileRefreshes=%d, tileLoads=%d, pushTargetSizes=%s\n")
 		TEXT("disk cache: %s %s files=%d %.1f / %d MB, hits=%lld misses=%lld stale=%lld writes=%lld writeFails=%lld loading=%d avgDecode=%.1f ms, folder=%s"),
 		S->bUseFrameCache ? TEXT("on") : TEXT("OFF"), Entries.Num(), Complete, FromDisk, Frames, MemBytes / (1024.0 * 1024.0), InFlightCpuBytes / (1024.0 * 1024.0),
-		S->CacheMemoryMB, Evictions, PushTiles.Num(), PushedFrames, DrawHits, Renders, NotStoredBusy, OverBudget, GBongTileTexturesCreated.load(), TileRefreshes, TileLoads,
+		S->CacheMemoryMB, Evictions, PushTiles.Num(), PushedFrames, DrawHits, Renders, NotStoredBusy, OverBudget, GBongTileTexturesCreated.load(), TileRefreshes, TileLoads, SizesStr.IsEmpty() ? TEXT("-") : *SizesStr,
 		S->bEnableDiskCache ? TEXT("on") : TEXT("OFF"), bIndexReady ? TEXT("ready") : TEXT("scanning"), Index.Num(), DiskBytes / (1024.0 * 1024.0), S->MaxDiskCacheMB,
 		DiskHits, DiskMisses, DiskStale, DiskWrites, DiskWriteFails, LoadsInFlight.Num() + PendingUploads.Num(),
 		DiskHits > 0 ? DiskDecodeMsTotal / DiskHits : 0.0, *GetCacheDir());

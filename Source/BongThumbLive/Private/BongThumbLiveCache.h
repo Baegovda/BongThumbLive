@@ -1,4 +1,4 @@
-// BongThumbLive - animation thumbnail frame cache.
+﻿// BongThumbLive - animation thumbnail frame cache.
 //
 // * GPU atlas per animation: every frame (quantised to Cache FPS, at most "MaxFramesPerAsset" frames, Cache Resolution
 //   px per cell) lives in ONE GPU texture. Playback of a complete entry is a per-tile GPU copy of the one cell that is
@@ -115,6 +115,9 @@ public:
 		TSharedPtr<FAssetThumbnailPool> Pool;
 		bool bAllowFill = true;
 		double FillDeadline = 0.0;
+		/** Pool thumbnail sizes the on-screen tile widgets of each animation actually display (the Content Browser
+		 * creates tile thumbnails at 256 or at its current thumbnail size, and the pool keys textures by size). */
+		TMap<FSoftObjectPath, TArray<FIntPoint, TInlineAllocator<2>>> TileSizes;
 	};
 	/** Disk loads/uploads, LRU, index, playback push of complete entries and fill of missing frames. */
 	void Tick(const FTickParams& Params);
@@ -214,14 +217,21 @@ private:
 	TArray<TSharedPtr<FBongReadbackJob, ESPMode::ThreadSafe>> Readbacks;
 	TSharedPtr<FBongAsyncShared, ESPMode::ThreadSafe> Shared;
 
-	struct FPushTile
+	struct FPushTarget
 	{
 		TSharedPtr<FAssetThumbnail> Thumb;
-		double LastActive = 0.0;
 		int32 LastPushed = INDEX_NONE;
 		double LastRefresh = -1000.0;
-		bool bLoadRequested = false;
 	};
+	struct FPushTile
+	{
+		/** One per pool texture size shown on screen for this asset (see FTickParams::TileSizes). */
+		TArray<FPushTarget, TInlineAllocator<2>> Targets;
+		double LastActive = 0.0;
+		bool bLoadRequested = false;
+		void ResetPushed() { for (FPushTarget& T : Targets) { T.LastPushed = INDEX_NONE; } }
+	};
+	TMap<FIntPoint, int32> PushSizeCounts;
 	int32 TileRefreshes = 0;
 	int32 TileLoads = 0;
 	TMap<FSoftObjectPath, FPushTile> PushTiles;
