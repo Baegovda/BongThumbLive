@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-30 04:50 KST (Asia/Seoul).
+Last update: 2026-10-30 04:52 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -205,3 +205,6 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 - **Cold numbers:** before1: pending 40-47, ownedAnimRoots 12, waiting 5-8 tiles at +12.6 s every step, newTileToShown avg 11.5 s max 62.9 s. after1: pending 0, ownedAnimRoots 0, waiting 0 at every status, newTileToShown avg 3.1 s max 10.0 s (max = initial view during cold DDC anim compression; scrolled-in tiles avg ~0.6 s vs ~16 s before).
 - Backups: `BongThumbLiveCache.cpp.bak5`, `BongThumbLiveModule.cpp.bak8`, `BongThumbLiveRenderer.cpp.bak7`, `Public/BongThumbLiveRenderer.h.bak3`, `BongThumbLiveModule.h.bak6`, `BongThumbLiveCache.h.bak3` (the two .h backups were copied from the clone = pkg17 content); binaries `.bak15` = pkg17.
 - Note: I closed the user's own UE_VFX_57 editor (CloseMainWindow, closed cleanly) to run tests.
+
+## Pending request (do NOT start until the user says so)
+- 2026-10-30 04:51 KST: Baegovda will test after sleeping (clear the disk cache before every test). Wanted next: a loading/buffering animation on a tile from when it is shown until its first frame is ready (idea: small spinner overlay drawn by the plugin; must work for unloaded anims and any tile size, see pushTargetSizes). Start only when the user is back and asks.
