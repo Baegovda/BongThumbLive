@@ -191,6 +191,37 @@ static const TArray<FSoftObjectPath>& BongFindCompatibleMeshPaths(USkeleton* Ske
 	return Empty;
 }
 
+/** For the give-up log: skeletal meshes next to the animation / skeleton that use a different, non-compatible skeleton. */
+static FString BongDescribeNearbyMeshes(const UAnimSequenceBase* Anim, const USkeleton* Skeleton)
+{
+	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TSet<FName> Folders;
+	Folders.Add(FName(*FPackageName::GetLongPackagePath(Anim->GetOutermost()->GetName())));
+	if (Skeleton)
+	{
+		Folders.Add(FName(*FPackageName::GetLongPackagePath(Skeleton->GetOutermost()->GetName())));
+	}
+	FString Out;
+	int32 Count = 0;
+	for (const FName& Folder : Folders)
+	{
+		TArray<FAssetData> Assets;
+		AssetRegistry.GetAssetsByPath(Folder, Assets, false);
+		for (const FAssetData& A : Assets)
+		{
+			if (!A.IsInstanceOf(USkeletalMesh::StaticClass()) || Count >= 4)
+			{
+				continue;
+			}
+			const FString Tag = A.GetTagValueRef<FString>(USkeletalMesh::GetSkeletonMemberName());
+			Out += FString::Printf(TEXT(" [nearby mesh %s uses skeleton %s, which is not this skeleton and not set as compatible]"),
+				*A.GetObjectPathString(), Tag.IsEmpty() ? TEXT("(unknown)") : *FSoftObjectPath(FPackageName::ExportTextPathToObjectPath(Tag)).ToString());
+			++Count;
+		}
+	}
+	return Out;
+}
+
 static bool BongMeshLoadFailedRecently(FName PackageName)
 {
 	const double* When = GBongMeshLoadsFailed.Find(PackageName);
@@ -280,7 +311,7 @@ static USkeletalMesh* BongResolvePreviewMesh(UAnimSequenceBase* Anim, bool& bOut
 				}
 				if (Slot.Failures >= 3)
 				{
-					Reasons += FString::Printf(TEXT(" [%s: other skeleton %s]"), *Path.ToString(), MeshSkeleton ? *MeshSkeleton->GetName() : TEXT("none"));
+					Reasons += FString::Printf(TEXT(" [%s: uses skeleton %s, which is not this skeleton and not set as compatible]"), *Path.ToString(), MeshSkeleton ? *MeshSkeleton->GetPathName() : TEXT("none"));
 				}
 			}
 			if (!Mesh && !bWaiting)
@@ -323,7 +354,7 @@ static USkeletalMesh* BongResolvePreviewMesh(UAnimSequenceBase* Anim, bool& bOut
 					Slot.bGaveUp = true;
 					++GBongResolveGaveUp;
 					UE_LOG(LogBongThumbLive, Log, TEXT("BongThumbLive: no usable preview mesh for %s (skeleton %s)%s - showing the stock thumbnail; checked again every 30 s and when assets change."),
-						*Anim->GetPathName(), Skeleton ? *Skeleton->GetPathName() : TEXT("none"), Reasons.IsEmpty() ? TEXT(" [no compatible skeletal mesh found]") : *Reasons);
+						*Anim->GetPathName(), Skeleton ? *Skeleton->GetPathName() : TEXT("none"), Reasons.IsEmpty() ? *(TEXT(" [no compatible skeletal mesh found]") + BongDescribeNearbyMeshes(Anim, Skeleton)) : *Reasons);
 				}
 				// 2, 4, 8 s, then every 30 s (cheap: memoized registry query, no loads unless a candidate appears).
 				Slot.NextTry = Now + (Slot.Failures >= 4 ? 30.0 : (double)(1 << Slot.Failures));

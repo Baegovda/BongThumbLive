@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-29 21:40 KST (Asia/Seoul).
+Last update: 2026-10-29 21:48 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -133,11 +133,15 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 - Gave-up tile: `/Game/SM2_Work/Tests/sani_before/hologram_planet/localbake/hologram_planet__anim` (skeleton hologram_planet_Skeleton). The mesh `hologram_planet` exists and is loaded, so the mesh's skeleton is probably not the same or compatible. Needs checking.
 
 ## In progress (exact step)
-- v2.2 source committed; pkg8 binaries deployed in the plugin (backups: .bak3 = v2.1, .bak4 = pkg6, .bak5 = pkg7, .bak6 = pkg8 copy). Plugin source backups .bak1/.bak3 = v2.1.
-- Next: verify in the editor (1) hologram_planet tile (Status `gaveUp=`, log "no usable preview mesh"), (2) disk-cache invalidation after edit + re-save of an anim outside protected folders (Status `stale=` increments, tile re-renders) and the tooltip, with screenshots; then final report. A Windows Security prompt window is open on the PC (left alone; the throttle override makes it harmless).
+- v2.2 source committed; **pkg11 binaries deployed** in the plugin. Binary backups in Binaries\Win64: .bak3 = v2.1, .bak4 = pkg6, .bak5 = pkg7, .bak6/.bak7 = pkg8, .bak8 = pkg9. Source backups next to each .cpp/.h (.bak1/.bak3 = v2.1; Renderer .bak4/.bak5 = intermediate v2.2).
+- Verification done 21:35-21:46 KST (script `Tools/btl_verify_v22.py`, `Tools/btl_holo.py`):
+  - **Disk-cache invalidation works:** A_bow_01 (Taunts01) metadata tag added → dirty → live re-render; after save the old `A_bow_01_ee45….btlc` was deleted and `A_bow_01_ca1a….btlc` written; tag removed + saved again → `A_bow_01_5a01….btlc`. Asset content back to the original (only the file timestamp changed).
+  - **hologram_planet:** real cause found. The anim uses `/Game/SM2_Work/Tests/sani_before/hologram_planet/localbake/hologram_planet_Skeleton`, but the mesh in the same folder uses `/Game/SM2_Work/Props/hologram_planet/hologram_planet_Skeleton` (a different skeleton with the same name, not marked compatible). No mesh can legally play this anim, so the tile shows the stock thumbnail (clear static fallback) and the log names the exact mismatch. Fix on the user side: re-target the anim to the Props skeleton or add the skeletons as compatible (not done: user asset).
+  - **Settings tooltip:** the on-screen hover could not be captured. Slate shows tooltips only in the foreground app, and Windows refused to bring the editor forward from a background process. The row hover highlight is visible in `btl_shots\v22_tooltip_diskcache*.png`. Needs a manual check by Baegovda.
+- A Windows Firewall prompt for **Unreal Insights** (from the trace export) is open on the PC. Left for Baegovda; either answer is fine for the plugin.
 
 ## Next steps
-1. Verification above + screenshots.
+1. Manual tooltip check by Baegovda (hover a setting on the BongThumbLive settings page).
 2. Optional: cold-folder v2.2 run on anim folders never opened before (DDC cold), to compare with base1.
 3. Report v2.2 readiness (no release).
 
