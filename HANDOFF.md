@@ -9,6 +9,19 @@ BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Brow
 - User = Lalamold (Korean). Replies to the user: **short Korean, 해요체**, beginner-friendly.
 - User quotes so far (Korean): "플러그인 작업은 마저 재개해줘"
 
+## Access (for a new bot that only has the repo URL)
+- The repo is **private**: https://github.com/Baegovda/BongThumbLive. To read it from the box, use the GitHub connector/tools (cursor-github), or `gh` on the user's PC. The PC's `gh` and git are already authenticated as the user (Revaptor_FX / revaptor@gmail.com) and can push.
+- All real work happens on the user's Windows PC. Use Shell with `machineId = d3fb99ad-25ca-45c1-81af-41e5ca09104a` (PowerShell), and use CopyToBox / CopyFromBox to move files.
+- If the clone at `C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo` is missing, run `gh repo clone Baegovda/BongThumbLive <dir>` on the PC.
+
+## Resume checklist (run first)
+1. `git -C C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo pull --ff-only`, then read this file from the clone (newest copy).
+2. Check the editor state: `Get-Process UnrealEditor*,CrashReportClient*`. If a crash reporter is open, close it and read `K:\Unreal Projects\UE_VFX_57\Saved\Crashes\<newest>`.
+3. Compare the plugin source with the clone: `git diff --no-index` between `K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive\Source` and `<clone>\Source`. Uncommitted plugin edits = work in progress described below.
+4. Check the newest backups (`*.bakN`) next to the changed files, and Binaries\Win64 timestamps vs. the source, to know whether the last build was deployed.
+5. Read the "In progress" section and continue from the exact step. After each step, update this file, commit and push (ff-only), and mirror it to /workspace/bongthumb/HANDOFF.md.
+6. Launch the editor (pre-authorized): `"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe" "K:\Unreal Projects\UE_VFX_57\UE_VFX_57.uproject" -AutoDeclinePackageRecovery [-ExecCmds="py <script>"]`. The log is at `K:\Unreal Projects\UE_VFX_57\Saved\Logs\UE_VFX_57.log`.
+
 ## Paths
 - User PC: machine id `d3fb99ad-25ca-45c1-81af-41e5ca09104a` (Windows, 128 GB RAM, 24C/32T). Run commands with Shell machineId (PowerShell).
 - Plugin (live, used by editor): `K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive`. This folder is NOT a git repo.
