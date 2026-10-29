@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-29 22:50 KST (Asia/Seoul).
+Last update: 2026-10-30 02:40 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -181,3 +181,6 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 ## Known risks
 - The git clone lives in %TEMP% (could be cleaned by Windows). Re-clone with gh if it is missing.
 - The plugin folder is not under git; the source of truth for edits is the plugin folder.
+
+## Bot handover log
+- 2026-10-30 02:40 KST: new bot account took over (PC Revaptor-FX registered, machine id d3fb99ad-25ca-45c1-81af-41e5ca09104a). Resume checklist verified: clone clean and in sync with origin/main (d311a2d), plugin Source identical to clone, pkg16 binaries deployed (02:18), no editor or crash reporter running, gh logged in as Baegovda. Remaining: final report of the SM2 tile fix, tooltip manual check, optional cold-DDC run.
