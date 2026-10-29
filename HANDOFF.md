@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-30 02:40 KST (Asia/Seoul).
+Last update: 2026-10-30 03:40 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -184,3 +184,9 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 
 ## Bot handover log
 - 2026-10-30 02:40 KST: new bot account took over (PC Revaptor-FX registered, machine id d3fb99ad-25ca-45c1-81af-41e5ca09104a). Resume checklist verified: clone clean and in sync with origin/main (d311a2d), plugin Source identical to clone, pkg16 binaries deployed (02:18), no editor or crash reporter running, gh logged in as Baegovda. Remaining: final report of the SM2 tile fix, tooltip manual check, optional cold-DDC run.
+
+## Unreal MCP (in progress, 2026-10-30 03:40 KST)
+- User asked to use MCP for real-time editor work. Project plugin McpAutomationBridge 0.5.30 (ChiR24/Unreal_mcp) listens on 127.0.0.1:8090,8091 inside the editor (log: "Automation bridge listening").
+- Matching server `unreal-engine-mcp-server@0.5.30` installed in `%TEMP%\btl_mcp` (not 0.6.0: plugin/server versions must match). `btl_mcp_client.mjs` there spawns it over stdio, lists 23 tools; usage: `node btl_mcp_client.mjs <tool> '<json args>'`. Server itself verified.
+- Blocked: UE_VFX_57 editor launched twice (03:21, 03:27) and exited by itself within 1 min (clean LogExit, no crash), so port 8091 was never reachable. Suspect: another Grok bot (BongLodge, project `C:\Users\Revaptor_FX\BongLodge_testproj\BLTest.uproject`, logs runI/runM.log) kills UnrealEditor processes on this PC. Unconfirmed.
+- Rules: MCP is read-only for assets (no modify/save/delete tools). Never kill BLTest editors or their crash reporter; tell them apart via `Get-CimInstance Win32_Process` CommandLine. Read-only inside BongLodge_testproj.
