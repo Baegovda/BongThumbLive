@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-29 21:05 KST (Asia/Seoul).
+Last update: 2026-10-29 21:40 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -45,6 +45,8 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
   - `btl_verify3.py` = timed run: Status dumps, screenshots, settings page; RUN number in `btl_run.txt`.
   - `btl_watchdog.ps1` = memory watchdog that kills the editor above a limit.
   - `btl_rep.ps1` = safe exact-string replace helper.
+- **Bench runner (use this):** copy `Tools/*` to Temp, edit `Temp\btl_bench_cfg.json` (run name, folders), then `pwsh -File $env:TEMP\btl_run.ps1 -Run <name>`. It starts the watchdog (`btl_mem_<name>.csv`), launches the editor with `-AutoDeclinePackageRecovery` and **`-ini:EditorSettings:[/Script/UnrealEd.EditorPerformanceSettings]:bThrottleCPUWhenNotForeground=False`** (otherwise any foreground window, e.g. a Windows Security prompt, drops the editor to ~3 fps and invalidates the run), waits up to 900 s, copies the log to `Temp\btl_<name>.log` and prints the parsed result.
+- Unreal Insights helpers in `Tools/`: `btl_trace_long.py` (events longer than N ms) and `btl_trace_agg.py` (aggregate by thread/depth/timer) over CSVs exported with `UnrealInsights.exe -OpenTraceFile=<utrace> -NoUI -AutoQuit -ExecOnAnalysisCompleteCmd="TimingInsights.ExportTimingEvents <csv> -threads=* -columns=ThreadName,TimerName,StartTime,Duration,Depth -startTime=a -endTime=b"`.
 - Bench tools in repo `Tools/`: `btl_bench.py` (run with `-ExecCmds="py C:/Users/Revaptor_FX/AppData/Local/Temp/btl_bench.py"`, config `btl_bench_cfg.json` in Temp), `btl_bench_parse.py <log>` (prints folder-click → first tile / first playing, hitch summary, fps<50 seconds), `btl_watchdog.ps1`.
 - Original bot's box notes (`/workspace/bongthumb/`) are optional extras only.
 
@@ -102,9 +104,19 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 
 ## Done (this session, 2026-10-29 evening)
 - Analysed run4 (fresh generation) and run5 (all cached) logs.
+- Baselines base1 (v2.1, cold DDC) and base2 (v2.1, warm DDC); Insights trace of the generation phase.
+- **v2.2 source changes (in repo Source/, build pkg8 deployed on the PC):**
+  - **Render governor** (Module.cpp): every offscreen anim scene render is bracketed by `BeginSceneRender/NoteSceneRender`; render-thread cost per render is measured with enqueued timestamp commands (EMA). Per-frame allowance = clamp(SceneRenderBudgetMs / msPerRender, 1, MaxSceneRendersPerFrame). CVars `BongThumbLive.SceneRenderBudgetMs` (6) and `BongThumbLive.MaxSceneRendersPerFrame` (16). Stats appended to `BongThumbLive.Status` ("sceneRenders: ...").
+  - FillFrames stops when `!CanSceneRender()`; pool Draw shows the nearest cached frame instead of rendering when over budget.
+  - Selection load: `GetAsset()` (sync, 17 s FlushAsyncLoading) → `LoadPackageAsync`.
+  - Anim readiness: `IsCompressedDataValid()` instead of `HasCompressedDataForPlatform` (that one could block); poll every 0.1 s.
+  - GC: incremental (`ForceGarbageCollection(false)`) unless memory pressure forces a full purge.
+  - Folder click: `OnContentBrowserPathChanged` opens a 3 s fast-scan window (tile scan every frame, requeue check 0.1 s, probe reset).
+  - Preview-mesh resolver (Renderer.cpp): candidates = anim preview mesh, skeleton preview mesh, then every mesh whose Skeleton tag is this skeleton or a compatible one, plus same-folder meshes passing `IsCompatibleForEditor`. Waits on compiling meshes instead of blocking. Failures back off 2/4/8 s; after 4 it logs the reasons once, shows the stock thumbnail, and re-checks every 30 s (success clears gave-up).
 
 ## Findings so far
-- **Main hitch cause (high confidence):**
+- **Insights trace (decisive):** the remaining ~100 ms frames during generation are the game thread waiting on the render thread (`Frame Sync Time → GameThreadWaitForTask`). v2.1 issued ~58 scene renders per frame (466 `SceneRenderBuilder_Render` in 0.84 s, ~1.7 ms render-thread time each) + UpdatePrimitive/CacheMeshDrawCommands/UnlockStagingBuffer. The game-thread FrameBudgetMs could not see this. `GRenderThreadTime` reads 0 here, hence the own measurement.
+- **Main hitch cause in run4/5 (high confidence):**
   - `OnContentBrowserSelectionChanged` calls `FAssetData::GetAsset()` **synchronously** for up to 64 selected unloaded assets (setting bLoadAnimsOnSelection, default true).
   - Each sync load pulls the anim, its skeleton, the preview mesh, materials and textures.
   - The log shows a single 17 s frame (`FlushAsyncLoading(362)`) right after the test selected 100 assets (sync_browser_to_objects). It happens in both run4 and run5.
@@ -121,24 +133,26 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 - Gave-up tile: `/Game/SM2_Work/Tests/sani_before/hologram_planet/localbake/hologram_planet__anim` (skeleton hologram_planet_Skeleton). The mesh `hologram_planet` exists and is loaded, so the mesh's skeleton is probably not the same or compatible. Needs checking.
 
 ## In progress (exact step)
-- Step: **baseline run "base1"** with the unchanged v2.1 binary launched 20:53 KST via Tools/btl_bench.py. Config (Temp\btl_bench_cfg.json): clear disk cache; empty folder `/Game/SM2_Work/Materials`; generation folders `/Game/Animations/HugeAnimBundle/TauntMultiPack/MegaTauntsPack01/Animations/Taunts` and `/Game/Animations/MinigunAnimationSet/Animations` (60 s each); then ClearMemoryCache + re-click folder 1 (disk path); then selection test = sync_browser_to_objects of all anims in `.../MegaTauntsPack02/Animations/Taunts`; quits the editor. Memory CSV: Temp\btl_mem_base1.csv.
-- After it quits: copy `Saved\Logs\UE_VFX_57.log` to `Temp\btl_base1.log`, run `python Temp\btl_bench_parse.py Temp\btl_base1.log`, record the numbers in "Measurements" below. Optionally a second warm baseline (base2) for a fair comparison (DDC/OS file cache warm).
-- Files touched so far: none in the plugin yet.
+- v2.2 source committed; pkg8 binaries deployed in the plugin (backups: .bak3 = v2.1, .bak4 = pkg6, .bak5 = pkg7, .bak6 = pkg8 copy). Plugin source backups .bak1/.bak3 = v2.1.
+- Next: verify in the editor (1) hologram_planet tile (Status `gaveUp=`, log "no usable preview mesh"), (2) disk-cache invalidation after edit + re-save of an anim outside protected folders (Status `stale=` increments, tile re-renders) and the tooltip, with screenshots; then final report. A Windows Security prompt window is open on the PC (left alone; the throttle override makes it harmless).
 
 ## Next steps
-1. Baseline measurement with the current v2.1 binary. Clear the disk cache for test folders with `BongThumbLive.ClearDiskCache`. Folder switch via `unreal.EditorUtilityLibrary.sync_browser_to_folders`.
-2. Fixes:
-   - selection load → async queue;
-   - GC non-full / incremental;
-   - FillFrames hard deadline incl. first frame, split setup across frames;
-   - budget check for uncached pool Draws;
-   - folder/path-changed kick + immediate visible enqueue + disk prefetch for folder assets;
-   - higher in-flight anim loads within the 12 cap;
-   - fallback mesh search over all compatible meshes/skeletons + clear static fallback.
-3. Build, back up as .bakN, relaunch, measure after, screenshots, commit, push, update HANDOFF.
+1. Verification above + screenshots.
+2. Optional: cold-folder v2.2 run on anim folders never opened before (DDC cold), to compare with base1.
+3. Report v2.2 readiness (no release).
 
 ## Measurements
-- (pending) base1.
+All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re-click, select 50 anims in Taunts02). "Hitches" = frames > 50 ms.
+
+| run | build | DDC | Taunts click→first playing | Taunts hitches (max) | Minigun hitches (max) | Selection of 50 | s with fps<50 | editor mem |
+|---|---|---|---|---|---|---|---|---|
+| base1 | v2.1 | cold | 2.05 s | 69 (1067 ms) | 60 (2134 ms) | 97 hitches, max 738 ms, ~9 fps ~10 s | 30/238 | ~6.7 GB |
+| base2 | v2.1 | warm | 0.41 s | 68 (141 ms) | 22 (126 ms) | 96 hitches, max 222 ms, ~8.5 fps 6 s | 19/242 | 6.5 GB |
+| after3 | v2.2 pkg8 | warm | 0.41 s | 1 (58 ms) | 4 (60 ms) | 1 hitch, 101 ms, first playing 0.52 s | 2/243 | 6.9 GB |
+
+- Disk re-click → first playing: base2 0.21 s, after3 0.12 s. Startup frame ~705 ms in all runs (editor, not plugin).
+- Cache throughput unchanged: disk writes 79 (base2) vs 77 (after3) in the same time; render-thread cost 1.77 ms/render, allowance ~3 renders/frame.
+- Honest note on folder click: with a warm DDC the click → first playing is ~0.4 s in both versions; the 2-4 s in base1 is the engine's DDC/anim compression + async package loading (engine side). Our part (scan/requeue latency) was cut by the fast-scan window; the big win of v2.2 is smoothness (no frame drops) during generation and selection.
 
 ## Known risks
 - The git clone lives in %TEMP% (could be cleaned by Windows). Re-clone with gh if it is missing.

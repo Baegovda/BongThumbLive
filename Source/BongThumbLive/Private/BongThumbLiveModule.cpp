@@ -8,6 +8,8 @@
 #include "Styling/AppStyle.h"
 #include "UObject/ObjectSaveContext.h"
 #include "HAL/PlatformMemory.h"
+#include "RenderingThread.h"
+#include <atomic>
 
 #include "Animation/AnimSequenceBase.h"
 #include "Animation/AnimSequence.h"
@@ -99,6 +101,79 @@ bool FBongThumbLiveModule::IsOverFrameBudget()
 	return GetRenderMsThisFrame() >= GetFrameBudgetMs();
 }
 
+// Render-thread governor (see CanSceneRender in the header). The render-thread cost of each scene render is measured
+// on the render thread itself (timestamps enqueued before / after it), so the per-frame allowance does not depend on
+// stats being enabled.
+static int32 GBongMaxScenesPerFrame = 16;
+static FAutoConsoleVariableRef CVarBongMaxScenesPerFrame(
+	TEXT("BongThumbLive.MaxSceneRendersPerFrame"), GBongMaxScenesPerFrame,
+	TEXT("Upper limit of off-screen thumbnail scene renders per engine frame (the governor adapts below it to the measured render-thread cost). Default 16."));
+static float GBongSceneBudgetMs = 6.f;
+static FAutoConsoleVariableRef CVarBongSceneBudgetMs(
+	TEXT("BongThumbLive.SceneRenderBudgetMs"), GBongSceneBudgetMs,
+	TEXT("Render-thread time (ms per engine frame) thumbnail scene renders may use. Default 6."));
+static uint64 GBongSceneFrame = ~0ull;
+static int32 GBongScenesThisFrame = 0;
+static int32 GBongSceneAllowance = 2;
+static std::atomic<float> GBongSceneRtMs{ 2.f }; // moving average, written on the render thread
+static uint64 GBongSceneRtStart = 0;               // render thread only
+static int64 GBongScenesDeferred = 0;
+static int64 GBongScenesRendered = 0;
+
+static void BongSceneGovernorFrame()
+{
+	if (GBongSceneFrame == GFrameCounter)
+	{
+		return;
+	}
+	GBongSceneFrame = GFrameCounter;
+	GBongScenesThisFrame = 0;
+	const float Cost = FMath::Max(0.05f, GBongSceneRtMs.load(std::memory_order_relaxed));
+	GBongSceneAllowance = FMath::Clamp(FMath::FloorToInt(FMath::Clamp(GBongSceneBudgetMs, 0.5f, 100.f) / Cost), 1, FMath::Clamp(GBongMaxScenesPerFrame, 1, 128));
+}
+
+bool FBongThumbLiveModule::CanSceneRender()
+{
+	BongSceneGovernorFrame();
+	if (GBongScenesThisFrame < GBongSceneAllowance)
+	{
+		return true;
+	}
+	++GBongScenesDeferred;
+	return false;
+}
+
+void FBongThumbLiveModule::BeginSceneRender()
+{
+	ENQUEUE_RENDER_COMMAND(BongSceneRenderBegin)([](FRHICommandListImmediate&)
+	{
+		GBongSceneRtStart = FPlatformTime::Cycles64();
+	});
+}
+
+void FBongThumbLiveModule::NoteSceneRender()
+{
+	BongSceneGovernorFrame();
+	++GBongScenesThisFrame;
+	++GBongScenesRendered;
+	ENQUEUE_RENDER_COMMAND(BongSceneRenderEnd)([](FRHICommandListImmediate&)
+	{
+		if (GBongSceneRtStart != 0)
+		{
+			const float Ms = (float)FPlatformTime::ToMilliseconds64(FPlatformTime::Cycles64() - GBongSceneRtStart);
+			GBongSceneRtStart = 0;
+			const float Old = GBongSceneRtMs.load(std::memory_order_relaxed);
+			GBongSceneRtMs.store(Old * 0.9f + FMath::Min(Ms, 100.f) * 0.1f, std::memory_order_relaxed);
+		}
+	});
+}
+
+FString FBongThumbLiveModule::GetRenderGovernorStats()
+{
+	return FString::Printf(TEXT("sceneRenders: %lld, rt %.2f ms each, allowance %d/frame (budget %.1f ms, max %d), deferred=%lld"),
+		GBongScenesRendered, GBongSceneRtMs.load(), GBongSceneAllowance, GBongSceneBudgetMs, GBongMaxScenesPerFrame, GBongScenesDeferred);
+}
+
 float FBongThumbLiveModule::GetLoopTime(const UAnimSequenceBase* Anim)
 {
 	const float Length = Anim ? Anim->GetPlayLength() : 0.f;
@@ -162,19 +237,19 @@ static bool BongIsAnimDataReady(const UAnimSequence* Seq)
 		GBongAnimReady.Add(Key);
 		return true;
 	}
-	// HasCompressedDataForPlatform builds the derived-data key (expensive): 0.5 s, 1 s, 2 s ... at most every 10 s per anim.
 	const double Now = FPlatformTime::Seconds();
 	int32 Tries = 0;
 	if (const TPair<double, int32>* Last = GBongAnimNotReadySince.Find(Key))
 	{
 		Tries = Last->Value;
-		if (Now - Last->Key < FMath::Min(0.5 * (double)(1 << FMath::Min(Tries, 5)), 10.0))
+		if (Now - Last->Key < 0.1) // cheap: poll at most 10x per second
 		{
 			return false;
 		}
 	}
-	static const ITargetPlatform* RunningPlatform = GetTargetPlatformManagerRef().GetRunningTargetPlatform();
-	if (RunningPlatform && Seq->HasCompressedDataForPlatform(RunningPlatform))
+	// v2.2: current-platform compressed data present and valid (fast path through the cached platform data; no
+	// derived-data key build per poll).
+	if (Seq->IsCompressedDataValid())
 	{
 		GBongAnimNotReadySince.Remove(Key);
 		GBongAnimReady.Add(Key);
@@ -675,7 +750,8 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 	// The asset views virtualise their tiles: only the rows inside the scroll viewport (plus a little overscan) exist
 	// as widgets. Counting the tile widgets therefore gives the number of thumbnails currently on screen, and it
 	// follows scrolling, resizing and thumbnail-size changes automatically.
-	if (Now - LastVisibleScanTime < 0.2 || !FSlateApplication::IsInitialized())
+	// Every 0.2 s; every frame for a few seconds after a folder change (the new tiles appear over several frames).
+	if (Now - LastVisibleScanTime < (Now < FastScanUntil ? 0.0 : 0.2) || !FSlateApplication::IsInitialized())
 	{
 		return;
 	}
@@ -905,7 +981,7 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 				HoveredAsset.IsValid() ? *HoveredAsset->GetName() : TEXT(""), S->HoverFPS, (int32)S->Mode, Tracked.Num(),
 				PerKind[1], PerKind[2], PerKind[3], PerKind[4], UBongThumbLiveFXRenderer::GetNumLiveScenes());
 			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: liveActive=%d visibleViews=%d visibleAnimTiles=%d FrameBudgetMs=%.1f avgDrawMs=%.2f renderMsThisFrame=%.2f | %s"),
-				LiveState, AssetViews.Num(), VisibleAnimPaths.Num(), GetFrameBudgetMs(), GBongAvgDrawMs, GetRenderMsThisFrame(), *UBongThumbLiveRenderer::GetResolveStats());
+				LiveState, AssetViews.Num(), VisibleAnimPaths.Num(), GetFrameBudgetMs(), GBongAvgDrawMs, GetRenderMsThisFrame(), *(UBongThumbLiveRenderer::GetResolveStats() + TEXT(" | ") + GetRenderGovernorStats()));
 			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: memory: editor %.1f GB (limit %.1f GB), free %.1f GB (minimum %d GB), pressure=%d (events %d), pendingAnimLoads=%d"),
 				LastUsedGB, LastCapGB, LastFreeGB, S->MinFreeMemoryGB, bMemoryPressure ? 1 : 0, PressureEvents, PendingAnimPaths.Num());
 		}),
@@ -1411,7 +1487,7 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 
 	// On-screen animations that are neither loaded nor playable from the cache (e.g. released, then evicted from
 	// memory with the disk cache off): queue them for loading again.
-	if (bAnims && bCacheOn && Settings->bAutoLoadVisibleFolder && !bMemoryPressure && Now - LastRequeueCheck > 2.0)
+	if (bAnims && bCacheOn && Settings->bAutoLoadVisibleFolder && !bMemoryPressure && Now - LastRequeueCheck > (Now < FastScanUntil ? 0.1 : 2.0))
 	{
 		LastRequeueCheck = Now;
 		for (const FSoftObjectPath& Path : VisibleAnimPaths)
@@ -1508,7 +1584,9 @@ void FBongThumbLiveModule::OnContentBrowserSelectionChanged(const TArray<FAssetD
 		}
 		if (!A.IsAssetLoaded() && IsKindEnabled(GetKind(A)))
 		{
-			A.GetAsset();
+			// v2.2: asynchronous (A.GetAsset() loaded up to 64 packages synchronously on the game thread: measured
+			// ~10 s at ~9 fps when 50 cold animations were selected).
+			LoadPackageAsync(A.PackageName.ToString());
 			--Budget;
 		}
 	}
@@ -1546,6 +1624,12 @@ void FBongThumbLiveModule::OnSettingsChanged()
 void FBongThumbLiveModule::OnContentBrowserPathChanged(const FString& NewPath)
 {
 	bFolderCheckRequested = true;
+	// Folder click: scan the new tiles and queue their loads right away instead of on the next 0.2 s / 2 s tick.
+	const double Now = FPlatformTime::Seconds();
+	FastScanUntil = Now + 3.0;
+	LastVisibleScanTime = 0.0;
+	LastRequeueCheck = 0.0;
+	LastProbeTime = 0.0;
 }
 
 FString FBongThumbLiveModule::GetCurrentContentBrowserFolder() const

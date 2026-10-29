@@ -16,6 +16,7 @@
 #include "UObject/ObjectKey.h"
 #include "UObject/GCObject.h"
 #include "UObject/Package.h"
+#include "Misc/PackageName.h"
 #include "CanvasTypes.h"
 #include "CanvasItem.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -108,9 +109,9 @@ public:
 };
 
 static TMap<FObjectKey, FBongMeshSlot> GBongMeshSlots;
-static TMap<FObjectKey, FSoftObjectPath> GBongCompatibleMeshPath; // per skeleton; null path = none found
+static TMap<FObjectKey, TArray<FSoftObjectPath>> GBongCompatibleMeshPaths; // per skeleton (asset registry, no loads)
+static TMap<FName, double> GBongMeshLoadsFailed; // package -> time of the failure (retried after 30 s)
 static TSet<FName> GBongMeshLoadsInFlight;
-static TSet<FName> GBongMeshLoadsFailed;
 static FBongMeshHolder* GBongMeshHolder = nullptr;
 static int64 GBongResolveFast = 0;
 static int64 GBongResolveSlow = 0;
@@ -134,42 +135,72 @@ static FSoftObjectPath BongReadPreviewMeshPath(const UObject* Obj)
 	return FSoftObjectPath();
 }
 
-static FSoftObjectPath BongFindCompatibleMeshPath(USkeleton* Skeleton)
+/** All skeletal meshes that can show this skeleton's animations, best first: meshes of the skeleton itself, of its
+ *  compatible skeletons, then any compatible mesh in the skeleton's folder (covers meshes whose Skeleton tag is
+ *  missing / stale). Loaded meshes come first within each group. Asset-registry only (no loads), once per skeleton. */
+static const TArray<FSoftObjectPath>& BongFindCompatibleMeshPaths(USkeleton* Skeleton)
 {
 	const FObjectKey Key(Skeleton);
-	if (const FSoftObjectPath* Found = GBongCompatibleMeshPath.Find(Key))
+	if (const TArray<FSoftObjectPath>* Found = GBongCompatibleMeshPaths.Find(Key))
 	{
 		return *Found;
 	}
 	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-	FARFilter Filter;
-	Filter.ClassPaths.Add(USkeletalMesh::StaticClass()->GetClassPathName());
-	Filter.TagsAndValues.Add(USkeletalMesh::GetSkeletonMemberName(), FAssetData(Skeleton).GetExportTextName());
-	TArray<FAssetData> Assets;
-	AssetRegistry.GetAssets(Filter, Assets);
-	FSoftObjectPath Result;
-	for (const FAssetData& Asset : Assets)
+	TArray<FSoftObjectPath> Result;
+	auto AddSorted = [&Result](TArray<FAssetData>& Assets)
 	{
-		if (Result.IsNull() || Asset.IsAssetLoaded())
+		Assets.StableSort([](const FAssetData& A, const FAssetData& B) { return A.IsAssetLoaded() && !B.IsAssetLoaded(); });
+		for (const FAssetData& Asset : Assets)
 		{
-			Result = Asset.GetSoftObjectPath();
-			if (Asset.IsAssetLoaded())
+			Result.AddUnique(Asset.GetSoftObjectPath());
+		}
+	};
+	{
+		FARFilter Filter;
+		Filter.ClassPaths.Add(USkeletalMesh::StaticClass()->GetClassPathName());
+		Filter.TagsAndValues.Add(USkeletalMesh::GetSkeletonMemberName(), FAssetData(Skeleton).GetExportTextName());
+		for (const TSoftObjectPtr<USkeleton>& Compatible : Skeleton->GetCompatibleSkeletons())
+		{
+			if (!Compatible.IsNull())
 			{
-				break; // prefer a mesh that is already in memory
+				const FSoftObjectPath CompatiblePath = Compatible.ToSoftObjectPath();
+				Filter.TagsAndValues.Add(USkeletalMesh::GetSkeletonMemberName(),
+					FString::Printf(TEXT("%s'%s'"), *USkeleton::StaticClass()->GetPathName(), *CompatiblePath.ToString()));
 			}
 		}
+		TArray<FAssetData> Assets;
+		AssetRegistry.GetAssets(Filter, Assets);
+		AddSorted(Assets);
 	}
-	if (!Result.IsNull() || !AssetRegistry.IsLoadingAssets())
 	{
-		GBongCompatibleMeshPath.Add(Key, Result); // an empty result during the initial scan is not memoized
+		// Same folder: meshes that the editor itself would accept for this skeleton.
+		TArray<FAssetData> Assets;
+		AssetRegistry.GetAssetsByPath(FName(*FPackageName::GetLongPackagePath(Skeleton->GetOutermost()->GetName())), Assets, false);
+		Assets.RemoveAll([Skeleton](const FAssetData& A)
+		{
+			return !A.IsInstanceOf(USkeletalMesh::StaticClass()) || !Skeleton->IsCompatibleForEditor(A, TEXT("Skeleton"));
+		});
+		AddSorted(Assets);
 	}
-	return Result;
+	if (Result.Num() > 0 || !AssetRegistry.IsLoadingAssets())
+	{
+		return GBongCompatibleMeshPaths.Add(Key, MoveTemp(Result)); // an empty result during the initial scan is not memoized
+	}
+	static TArray<FSoftObjectPath> Empty;
+	Empty = MoveTemp(Result);
+	return Empty;
+}
+
+static bool BongMeshLoadFailedRecently(FName PackageName)
+{
+	const double* When = GBongMeshLoadsFailed.Find(PackageName);
+	return When && FPlatformTime::Seconds() - *When < 30.0;
 }
 
 static void BongStartMeshLoad(const FSoftObjectPath& Path)
 {
 	const FName PackageName = Path.GetLongPackageFName();
-	if (PackageName.IsNone() || GBongMeshLoadsInFlight.Contains(PackageName) || GBongMeshLoadsFailed.Contains(PackageName))
+	if (PackageName.IsNone() || GBongMeshLoadsInFlight.Contains(PackageName) || BongMeshLoadFailedRecently(PackageName))
 	{
 		return;
 	}
@@ -182,7 +213,7 @@ static void BongStartMeshLoad(const FSoftObjectPath& Path)
 			GBongMeshLoadsInFlight.Remove(LoadedName);
 			if (Result != EAsyncLoadingResult::Succeeded || !Package)
 			{
-				GBongMeshLoadsFailed.Add(LoadedName);
+				GBongMeshLoadsFailed.Add(LoadedName, FPlatformTime::Seconds());
 			}
 		}));
 }
@@ -206,62 +237,103 @@ static USkeletalMesh* BongResolvePreviewMesh(UAnimSequenceBase* Anim, bool& bOut
 	}
 	else
 	{
-		if (Slot.bGaveUp || Now < Slot.NextTry)
+		if (Now < Slot.NextTry)
 		{
 			return nullptr;
 		}
 		++GBongResolveSlow;
 		USkeleton* Skeleton = Anim->GetSkeleton();
-		bool bWaitingForLoad = false;
+		bool bWaiting = false;
+		FString Reasons;
 		if (Skeleton)
 		{
-			const FSoftObjectPath Candidates[] = { BongReadPreviewMeshPath(Anim), BongReadPreviewMeshPath(Skeleton), FSoftObjectPath() };
-			for (int32 i = 0; i < 3 && !Mesh; ++i)
+			TArray<FSoftObjectPath, TInlineAllocator<16>> Candidates;
+			Candidates.Add(BongReadPreviewMeshPath(Anim));
+			Candidates.AddUnique(BongReadPreviewMeshPath(Skeleton));
+			for (const FSoftObjectPath& P : BongFindCompatibleMeshPaths(Skeleton))
 			{
-				const FSoftObjectPath Path = (i < 2) ? Candidates[i] : BongFindCompatibleMeshPath(Skeleton);
-				if (Path.IsNull())
+				Candidates.AddUnique(P);
+			}
+			// Pass 1: any candidate that is already in memory and usable. Pass 2: load the first loadable one.
+			for (const FSoftObjectPath& Path : Candidates)
+			{
+				USkeletalMesh* Candidate = Path.IsNull() ? nullptr : Cast<USkeletalMesh>(Path.ResolveObject());
+				if (!Candidate)
 				{
 					continue;
 				}
-				if (USkeletalMesh* Candidate = Cast<USkeletalMesh>(Path.ResolveObject()))
+				if (!FBongThumbLiveModule::IsObjectSafe(Candidate))
 				{
-					USkeleton* MeshSkeleton = Candidate->GetSkeleton();
-					if (MeshSkeleton && (MeshSkeleton == Skeleton || Skeleton->IsCompatibleForEditor(MeshSkeleton)))
-					{
-						Mesh = Candidate;
-					}
+					bWaiting = true; // still loading
+					continue;
 				}
-				else if (!GBongMeshLoadsFailed.Contains(Path.GetLongPackageFName()))
+				if (Candidate->IsCompiling())
 				{
-					if (GBongMeshLoadsInFlight.Num() >= 2 && !GBongMeshLoadsInFlight.Contains(Path.GetLongPackageFName()))
+					bWaiting = true; // GetSkeleton() would wait for the mesh build on the game thread: check again later
+					continue;
+				}
+				USkeleton* MeshSkeleton = Candidate->GetSkeleton();
+				if (MeshSkeleton && (MeshSkeleton == Skeleton || Skeleton->IsCompatibleForEditor(MeshSkeleton)))
+				{
+					Mesh = Candidate;
+					break;
+				}
+				if (Slot.Failures >= 3)
+				{
+					Reasons += FString::Printf(TEXT(" [%s: other skeleton %s]"), *Path.ToString(), MeshSkeleton ? *MeshSkeleton->GetName() : TEXT("none"));
+				}
+			}
+			if (!Mesh && !bWaiting)
+			{
+				for (const FSoftObjectPath& Path : Candidates)
+				{
+					if (Path.IsNull() || Path.ResolveObject())
 					{
-						bWaitingForLoad = true; // at most two mesh loads at a time (memory)
-						break;
+						continue;
 					}
-					BongStartMeshLoad(Path);
-					bWaitingForLoad = true;
+					const FName Package = Path.GetLongPackageFName();
+					if (BongMeshLoadFailedRecently(Package))
+					{
+						if (Slot.Failures >= 3)
+						{
+							Reasons += FString::Printf(TEXT(" [%s: load failed]"), *Path.ToString());
+						}
+						continue;
+					}
+					if (GBongMeshLoadsInFlight.Num() < 2 || GBongMeshLoadsInFlight.Contains(Package))
+					{
+						BongStartMeshLoad(Path); // at most two mesh loads at a time (memory)
+					}
+					bWaiting = true;
 					break; // try again once it is in memory
 				}
 			}
 		}
 		if (!Mesh)
 		{
-			if (bWaitingForLoad)
+			if (bWaiting)
 			{
 				Slot.NextTry = Now + 0.25;
 			}
-			else if (++Slot.Failures >= 4)
-			{
-				Slot.bGaveUp = true;
-				++GBongResolveGaveUp;
-				UE_LOG(LogBongThumbLive, Log, TEXT("BongThumbLive: no usable preview mesh for %s (skeleton %s) - live thumbnail disabled for it until the asset or settings change."),
-					*Anim->GetPathName(), Skeleton ? *Skeleton->GetPathName() : TEXT("none"));
-			}
 			else
 			{
-				Slot.NextTry = Now + (double)(1 << Slot.Failures); // 2, 4, 8 s
+				++Slot.Failures;
+				if (Slot.Failures == 4)
+				{
+					Slot.bGaveUp = true;
+					++GBongResolveGaveUp;
+					UE_LOG(LogBongThumbLive, Log, TEXT("BongThumbLive: no usable preview mesh for %s (skeleton %s)%s - showing the stock thumbnail; checked again every 30 s and when assets change."),
+						*Anim->GetPathName(), Skeleton ? *Skeleton->GetPathName() : TEXT("none"), Reasons.IsEmpty() ? TEXT(" [no compatible skeletal mesh found]") : *Reasons);
+				}
+				// 2, 4, 8 s, then every 30 s (cheap: memoized registry query, no loads unless a candidate appears).
+				Slot.NextTry = Now + (Slot.Failures >= 4 ? 30.0 : (double)(1 << Slot.Failures));
 			}
 			return nullptr;
+		}
+		if (Slot.bGaveUp)
+		{
+			--GBongResolveGaveUp;
+			Slot.bGaveUp = false;
 		}
 		Slot.Mesh = Mesh;
 		Slot.Failures = 0;
@@ -279,7 +351,7 @@ static USkeletalMesh* BongResolvePreviewMesh(UAnimSequenceBase* Anim, bool& bOut
 static void BongResetMeshSlots()
 {
 	GBongMeshSlots.Reset();
-	GBongCompatibleMeshPath.Reset();
+	GBongCompatibleMeshPaths.Reset();
 	GBongMeshLoadsFailed.Reset();
 }
 
@@ -663,6 +735,10 @@ int32 UBongThumbLiveRenderer::FillFrames(UAnimSequenceBase* Anim, FBongCacheEntr
 		{
 			break;
 		}
+		if (!FBongThumbLiveModule::CanSceneRender())
+		{
+			break; // render thread / GPU busy: continue next frame (spread instead of a burst)
+		}
 		const float Time = FMath::Clamp((float)Frame / FMath::Max(Entry.Fps, 1.f), 0.f, FMath::Max(0.f, Entry.Length - UE_KINDA_SMALL_NUMBER));
 		if (!GBongFillScene->SetAnimation(Anim, Time, bStable))
 		{
@@ -675,8 +751,10 @@ int32 UBongThumbLiveRenderer::FillFrames(UAnimSequenceBase* Anim, FBongCacheEntr
 		ViewFamily.EngineShowFlags.DisableAdvancedFeatures();
 		ViewFamily.EngineShowFlags.MotionBlur = 0;
 		ViewFamily.EngineShowFlags.LOD = 0;
+		FBongThumbLiveModule::BeginSceneRender();
 		RenderViewFamily(&Canvas, &ViewFamily, GBongFillScene->CreateView(&ViewFamily, 0, 0, Size, Size));
 		Canvas.Flush_GameThread();
+		FBongThumbLiveModule::NoteSceneRender();
 		Cache.StoreFrame(Entry, Frame, Resource, FIntRect(0, 0, Size, Size), GBongFillScene->GetMesh());
 		++Done;
 	}
@@ -800,7 +878,8 @@ void UBongThumbLiveRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Widt
 		}
 		// Frame budget used up (and not the hovered tile): show the nearest cached frame instead of rendering.
 		const FBongThumbLiveModule* Module = FBongThumbLiveModule::GetPtr();
-		if (Entry->NumValid > 0 && FBongThumbLiveModule::IsOverFrameBudget() && !(Module && Module->IsHovered(Anim)))
+		if (Entry->NumValid > 0 && !(Module && Module->IsHovered(Anim))
+			&& (FBongThumbLiveModule::IsOverFrameBudget() || !FBongThumbLiveModule::CanSceneRender()))
 		{
 			Cache->ShowFrame(*Entry, Entry->NearestValid(FrameIndex), Canvas, RenderTarget, DstRect, Now);
 			NotifyDrawn();
@@ -825,7 +904,9 @@ void UBongThumbLiveRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Widt
 	ViewFamily.EngineShowFlags.DisableAdvancedFeatures();
 	ViewFamily.EngineShowFlags.MotionBlur = 0;
 	ViewFamily.EngineShowFlags.LOD = 0;
+	FBongThumbLiveModule::BeginSceneRender();
 	RenderViewFamily(Canvas, &ViewFamily, ThumbnailScene->CreateView(&ViewFamily, X, Y, Width, Height));
+	FBongThumbLiveModule::NoteSceneRender();
 	// The scene keeps its mesh / preview instance for the next draw (released by PruneIdle after a few idle seconds).
 	LastSceneUse = Now;
 

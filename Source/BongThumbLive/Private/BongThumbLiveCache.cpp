@@ -1945,9 +1945,11 @@ namespace BongOwned
 		{
 			return;
 		}
+		// v2.2: the purge is incremental (spread over frames) unless memory is low.
+		const bool bFullPurge = GGCForce;
 		GGCPending = false;
 		GGCForce = false;
 		GLastGC = Now;
-		GEngine->ForceGarbageCollection(true);
+		GEngine->ForceGarbageCollection(bFullPurge);
 	}
 }

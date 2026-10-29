@@ -66,6 +66,19 @@ public:
 	static bool IsOverFrameBudget();
 	static double GetFrameBudgetMs();
 
+	/**
+	 * Render-thread / GPU governor for off-screen scene renders (cache fill and uncached live draws).
+	 * The game-thread budget above does not see the render-thread cost of a scene render (~1.5-2 ms each with a
+	 * re-created skinned proxy), so a fill that was cheap on the game thread could queue 50+ renders in one frame and
+	 * the next frames waited ~100 ms in "Frame Sync" (measured with Unreal Insights, v2.1). The number of scene renders
+	 * per engine frame now follows their measured render-thread cost (BongThumbLive.SceneRenderBudgetMs per frame).
+	 */
+	static bool CanSceneRender();
+	/** Bracket a scene render: BeginSceneRender() before RenderViewFamily, NoteSceneRender() after it. */
+	static void BeginSceneRender();
+	static void NoteSceneRender();
+	static FString GetRenderGovernorStats();
+
 private:
 	bool Tick(float DeltaTime);
 	void OnContentBrowserSelectionChanged(const TArray<FAssetData>& Selected, bool bIsPrimaryBrowser);
@@ -155,6 +168,8 @@ private:
 	TMap<FString, TWeakObjectPtr<UObject>> TagCache;
 	double LastAssetViewScanTime = 0.0;
 	double LastVisibleScanTime = 0.0;
+	/** Until then (a few seconds after a folder change) tiles are scanned every frame and missing anims re-queued quickly. */
+	double FastScanUntil = 0.0;
 	int32 VisibleTileCount = 0;
 	/** Keys of VisibleTiles (on screen in a visible Content Browser right now). */
 	TSet<FObjectKey> VisibleTileKeys;
