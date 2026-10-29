@@ -19,6 +19,8 @@
 #include "RHICommandList.h"
 #include "Slate/SlateTextures.h"
 #include "AssetThumbnail.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/Package.h"
 #include "ThumbnailRendering/ThumbnailManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
@@ -1571,7 +1573,28 @@ void FBongThumbCache::Push(const FTickParams& Params, const TSet<FSoftObjectPath
 		FSlateTexture2DRHIRef* Dst = static_cast<FSlateTexture2DRHIRef*>(Tile.Thumb->GetViewportRenderTargetTexture());
 		if (!Dst)
 		{
-			continue; // the pool has not produced the tile texture yet
+			// No GPU texture yet: the pool never rendered this tile successfully (e.g. it tried while the asset was
+			// unloaded and had no saved thumbnail, or before a preview mesh was known). Without a pool render the tile
+			// keeps the class icon (or stays black) forever and only a mouse hover fixed it. Now that the cache has
+			// frames, the renderer can serve them, so ask the pool to render the tile again (asset loaded), or load
+			// the asset first (read-only async load; the pool re-renders tiles of freshly loaded assets).
+			const FAssetData& Data = Tile.Thumb->GetAssetData();
+			if (Now - Tile.LastRefresh >= 1.0)
+			{
+				Tile.LastRefresh = Now;
+				if (Data.IsAssetLoaded())
+				{
+					Params.Pool->RefreshThumbnail(Tile.Thumb);
+					++TileRefreshes;
+				}
+				else if (!Tile.bLoadRequested)
+				{
+					Tile.bLoadRequested = true;
+					LoadPackageAsync(Data.PackageName.ToString());
+					++TileLoads;
+				}
+			}
+			continue;
 		}
 		Tile.LastPushed = Frame;
 		E->LastShown = Frame;
@@ -1722,10 +1745,10 @@ FString FBongThumbCache::GetStats() const
 		Frames += Pair.Value->NumValid;
 		FromDisk += Pair.Value->bFromDisk ? 1 : 0;
 	}
-	return FString::Printf(TEXT("memory cache: %s entries=%d (complete %d, from disk %d) frames=%lld GPU=%.1f MB (+cpu in flight %.1f MB) / %d MB, evictions=%lld, playing tiles=%d, pushed frames=%lld, draw hits=%lld, renders=%lld, notStored(compiling)=%lld, overBudget=%lld, tileTexturesCreated=%d\n")
+	return FString::Printf(TEXT("memory cache: %s entries=%d (complete %d, from disk %d) frames=%lld GPU=%.1f MB (+cpu in flight %.1f MB) / %d MB, evictions=%lld, playing tiles=%d, pushed frames=%lld, draw hits=%lld, renders=%lld, notStored(compiling)=%lld, overBudget=%lld, tileTexturesCreated=%d, tileRefreshes=%d, tileLoads=%d\n")
 		TEXT("disk cache: %s %s files=%d %.1f / %d MB, hits=%lld misses=%lld stale=%lld writes=%lld writeFails=%lld loading=%d avgDecode=%.1f ms, folder=%s"),
 		S->bUseFrameCache ? TEXT("on") : TEXT("OFF"), Entries.Num(), Complete, FromDisk, Frames, MemBytes / (1024.0 * 1024.0), InFlightCpuBytes / (1024.0 * 1024.0),
-		S->CacheMemoryMB, Evictions, PushTiles.Num(), PushedFrames, DrawHits, Renders, NotStoredBusy, OverBudget, GBongTileTexturesCreated.load(),
+		S->CacheMemoryMB, Evictions, PushTiles.Num(), PushedFrames, DrawHits, Renders, NotStoredBusy, OverBudget, GBongTileTexturesCreated.load(), TileRefreshes, TileLoads,
 		S->bEnableDiskCache ? TEXT("on") : TEXT("OFF"), bIndexReady ? TEXT("ready") : TEXT("scanning"), Index.Num(), DiskBytes / (1024.0 * 1024.0), S->MaxDiskCacheMB,
 		DiskHits, DiskMisses, DiskStale, DiskWrites, DiskWriteFails, LoadsInFlight.Num() + PendingUploads.Num(),
 		DiskHits > 0 ? DiskDecodeMsTotal / DiskHits : 0.0, *GetCacheDir());

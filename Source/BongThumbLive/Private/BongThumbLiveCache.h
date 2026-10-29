@@ -219,7 +219,11 @@ private:
 		TSharedPtr<FAssetThumbnail> Thumb;
 		double LastActive = 0.0;
 		int32 LastPushed = INDEX_NONE;
+		double LastRefresh = -1000.0;
+		bool bLoadRequested = false;
 	};
+	int32 TileRefreshes = 0;
+	int32 TileLoads = 0;
 	TMap<FSoftObjectPath, FPushTile> PushTiles;
 	TMap<FName, TPair<FString, double>> SigCache;
 	TMap<FSoftObjectPath, FAssetData> AnimInfo;
