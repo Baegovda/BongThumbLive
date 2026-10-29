@@ -1,17 +1,29 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-29 20:55 KST (Asia/Seoul).
+Last update: 2026-10-29 21:05 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
 
 ## Talking to the user
-- User = Lalamold (Korean). Replies to the user: **short Korean, 해요체**, beginner-friendly.
+- Owner/user = **Baegovda** (GitHub name; Korean speaker; Windows PC user account `Revaptor_FX`). Replies to the user: **short Korean, 해요체**, beginner-friendly.
 - User quotes so far (Korean): "플러그인 작업은 마저 재개해줘"
+
+## Fresh environment setup (new bot, new account, empty box, PC not registered)
+Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything needed is in this repo and on Baegovda's PC.
+1. **Connect the PC.** Ask Baegovda (short Korean 해요체) to register their Windows PC with you, e.g. "작업용 PC를 연결해 주세요 (Revaptor-FX)". The PC is named **Revaptor-FX**, Windows user `Revaptor_FX`. Identify it by these paths existing:
+   - `K:\Unreal Projects\UE_VFX_57\UE_VFX_57.uproject` (project)
+   - `K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive\BongThumbLive.uplugin` (plugin)
+   - `C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe` (engine)
+   The old machine id was `d3fb99ad-25ca-45c1-81af-41e5ca09104a` (valid only on the original bot account). Shell on the PC is PowerShell (pwsh).
+2. **GitHub access.** The repo is private (owner Baegovda). The PC already has `gh` 2.95 + git 2.47 logged in and able to push: verify with `gh auth status` on the PC. Clone if missing: `gh repo clone Baegovda/BongThumbLive C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo`. If `gh` is logged out, ask Baegovda to run `gh auth login` on the PC (do not handle tokens yourself). A GitHub connector on your side is optional (read-only convenience).
+3. **Required tools on the PC** (all already installed): UE 5.7 at `C:\Program Files\Epic Games\UE_5.7`; RunUAT `C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\RunUAT.bat` (needs Visual Studio 2022 C++ toolchain, present); git, gh; Python 3.10 (`C:\Program Files\Python310\python.exe`) for log parsing.
+4. **Test tools live in the repo** under `Tools/` (bench script, log parser, watchdog). Copy them to `C:\Users\Revaptor_FX\AppData\Local\Temp\` before running (the bench script reads its config from there).
+5. Then run the Resume checklist below.
 
 ## Access (for a new bot that only has the repo URL)
 - The repo is **private**: https://github.com/Baegovda/BongThumbLive. To read it from the box, use the GitHub connector/tools (cursor-github), or `gh` on the user's PC. The PC's `gh` and git are already authenticated as the user (Revaptor_FX / revaptor@gmail.com) and can push.
-- All real work happens on the user's Windows PC. Use Shell with `machineId = d3fb99ad-25ca-45c1-81af-41e5ca09104a` (PowerShell), and use CopyToBox / CopyFromBox to move files.
+- All real work happens on the user's Windows PC. Use Shell targeted at the PC (PowerShell; see Fresh environment setup to find/register it), and use CopyToBox / CopyFromBox to move files.
 - If the clone at `C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo` is missing, run `gh repo clone Baegovda/BongThumbLive <dir>` on the PC.
 
 ## Resume checklist (run first)
@@ -19,11 +31,11 @@ BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Brow
 2. Check the editor state: `Get-Process UnrealEditor*,CrashReportClient*`. If a crash reporter is open, close it and read `K:\Unreal Projects\UE_VFX_57\Saved\Crashes\<newest>`.
 3. Compare the plugin source with the clone: `git diff --no-index` between `K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive\Source` and `<clone>\Source`. Uncommitted plugin edits = work in progress described below.
 4. Check the newest backups (`*.bakN`) next to the changed files, and Binaries\Win64 timestamps vs. the source, to know whether the last build was deployed.
-5. Read the "In progress" section and continue from the exact step. After each step, update this file, commit and push (ff-only), and mirror it to /workspace/bongthumb/HANDOFF.md.
+5. Read the "In progress" section and continue from the exact step. After each step, update this file, commit and push (ff-only). (Optional: mirror a copy to your own box; never rely on it.)
 6. Launch the editor (pre-authorized): `"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe" "K:\Unreal Projects\UE_VFX_57\UE_VFX_57.uproject" -AutoDeclinePackageRecovery [-ExecCmds="py <script>"]`. The log is at `K:\Unreal Projects\UE_VFX_57\Saved\Logs\UE_VFX_57.log`.
 
 ## Paths
-- User PC: machine id `d3fb99ad-25ca-45c1-81af-41e5ca09104a` (Windows, 128 GB RAM, 24C/32T). Run commands with Shell machineId (PowerShell).
+- User PC: **Revaptor-FX** (original-account machine id `d3fb99ad-25ca-45c1-81af-41e5ca09104a`; Windows, 128 GB RAM, 24C/32T). Run commands with Shell machineId (PowerShell).
 - Plugin (live, used by editor): `K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive`. This folder is NOT a git repo.
 - Git clone used for commits: `C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo` (origin https://github.com/Baegovda/BongThumbLive.git, **private**). Workflow: edit the plugin source, then copy the changed files into the clone, then commit and push (fast-forward only).
 - Project: `K:\Unreal Projects\UE_VFX_57\UE_VFX_57.uproject`; engine `C:\Program Files\Epic Games\UE_5.7`.
@@ -33,7 +45,8 @@ BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Brow
   - `btl_verify3.py` = timed run: Status dumps, screenshots, settings page; RUN number in `btl_run.txt`.
   - `btl_watchdog.ps1` = memory watchdog that kills the editor above a limit.
   - `btl_rep.ps1` = safe exact-string replace helper.
-- Box (agent) notes: `/workspace/bongthumb/` (README.md, run logs, screenshots, HANDOFF mirror).
+- Bench tools in repo `Tools/`: `btl_bench.py` (run with `-ExecCmds="py C:/Users/Revaptor_FX/AppData/Local/Temp/btl_bench.py"`, config `btl_bench_cfg.json` in Temp), `btl_bench_parse.py <log>` (prints folder-click → first tile / first playing, hitch summary, fps<50 seconds), `btl_watchdog.ps1`.
+- Original bot's box notes (`/workspace/bongthumb/`) are optional extras only.
 
 ## Repo / releases
 - v2.1 released: tag commit 9b3050e; README fix 8d9a9ac (main).
@@ -52,8 +65,8 @@ BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Brow
 - Keep the plugin's memory caps: 1024 MB GPU frame cache, 6 meshes / 12 anims, MinFreeMemoryGB 8, MaxDiskCacheMB 2048.
 - Settings UI text stays Korean and beginner-friendly.
 - Commits: fast-forward only, never force-push. No new release.
-- Screenshots go to the box under /workspace/bongthumb/.
-- This chat may be cut off at any time. Update this file after every meaningful step, then commit and push it, and mirror it to /workspace/bongthumb/HANDOFF.md.
+- Screenshots: save on the PC under `C:\Users\Revaptor_FX\AppData\Local\Temp\btl_shots\` and copy to your box (original bot: `/workspace/bongthumb/`). Also commit small ones to `Docs/` if useful.
+- This chat may be cut off at any time. Update this file after every meaningful step, then commit and push it. The repo copy is the only source of truth.
 
 ## Architecture (source in Source/BongThumbLive)
 - `BongThumbLiveModule.cpp`: core ticker.
@@ -108,9 +121,9 @@ BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Brow
 - Gave-up tile: `/Game/SM2_Work/Tests/sani_before/hologram_planet/localbake/hologram_planet__anim` (skeleton hologram_planet_Skeleton). The mesh `hologram_planet` exists and is loaded, so the mesh's skeleton is probably not the same or compatible. Needs checking.
 
 ## In progress (exact step)
-- Step: writing HANDOFF, then building a measurement harness (real wall-clock frame times via perf_counter, hitch list, folder-click → first-live-tile timing), then code changes.
-- Files touched so far: none in the plugin yet (only HANDOFF.md / NEW_BOT_PROMPT.md in the repo).
-- Source snapshot for reading on the box: /workspace/bongthumb/work/Source.
+- Step: **baseline run "base1"** with the unchanged v2.1 binary launched 20:53 KST via Tools/btl_bench.py. Config (Temp\btl_bench_cfg.json): clear disk cache; empty folder `/Game/SM2_Work/Materials`; generation folders `/Game/Animations/HugeAnimBundle/TauntMultiPack/MegaTauntsPack01/Animations/Taunts` and `/Game/Animations/MinigunAnimationSet/Animations` (60 s each); then ClearMemoryCache + re-click folder 1 (disk path); then selection test = sync_browser_to_objects of all anims in `.../MegaTauntsPack02/Animations/Taunts`; quits the editor. Memory CSV: Temp\btl_mem_base1.csv.
+- After it quits: copy `Saved\Logs\UE_VFX_57.log` to `Temp\btl_base1.log`, run `python Temp\btl_bench_parse.py Temp\btl_base1.log`, record the numbers in "Measurements" below. Optionally a second warm baseline (base2) for a fair comparison (DDC/OS file cache warm).
+- Files touched so far: none in the plugin yet.
 
 ## Next steps
 1. Baseline measurement with the current v2.1 binary. Clear the disk cache for test folders with `BongThumbLive.ClearDiskCache`. Folder switch via `unreal.EditorUtilityLibrary.sync_browser_to_folders`.
@@ -123,6 +136,9 @@ BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Brow
    - higher in-flight anim loads within the 12 cap;
    - fallback mesh search over all compatible meshes/skeletons + clear static fallback.
 3. Build, back up as .bakN, relaunch, measure after, screenshots, commit, push, update HANDOFF.
+
+## Measurements
+- (pending) base1.
 
 ## Known risks
 - The git clone lives in %TEMP% (could be cleaned by Windows). Re-clone with gh if it is missing.

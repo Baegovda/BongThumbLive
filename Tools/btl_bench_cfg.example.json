@@ -1,0 +1,12 @@
+{
+  "run": "base1",
+  "select_folder": "/Game/Animations/HugeAnimBundle/TauntMultiPack/MegaTauntsPack02/Animations/Taunts",
+  "clear": true,
+  "gen_secs": 60,
+  "folders": [
+    "/Game/Animations/HugeAnimBundle/TauntMultiPack/MegaTauntsPack01/Animations/Taunts",
+    "/Game/Animations/MinigunAnimationSet/Animations"
+  ],
+  "empty": "/Game/SM2_Work/Materials",
+  "quit": true
+}
