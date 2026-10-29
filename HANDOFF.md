@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-29 21:48 KST (Asia/Seoul).
+Last update: 2026-10-29 22:50 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -137,8 +137,10 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 - Verification done 21:35-21:46 KST (script `Tools/btl_verify_v22.py`, `Tools/btl_holo.py`):
   - **Disk-cache invalidation works:** A_bow_01 (Taunts01) metadata tag added → dirty → live re-render; after save the old `A_bow_01_ee45….btlc` was deleted and `A_bow_01_ca1a….btlc` written; tag removed + saved again → `A_bow_01_5a01….btlc`. Asset content back to the original (only the file timestamp changed).
   - **hologram_planet:** real cause found. The anim uses `/Game/SM2_Work/Tests/sani_before/hologram_planet/localbake/hologram_planet_Skeleton`, but the mesh in the same folder uses `/Game/SM2_Work/Props/hologram_planet/hologram_planet_Skeleton` (a different skeleton with the same name, not marked compatible). No mesh can legally play this anim, so the tile shows the stock thumbnail (clear static fallback) and the log names the exact mismatch. Fix on the user side: re-target the anim to the Props skeleton or add the skeletons as compatible (not done: user asset).
+  - **hologram_planet assets: DO NOT TOUCH.** Baegovda said (22:44 KST) this is SM2 asset work handed to another bot. Facts (read-only diag `Tools/btl_skel_diag.py`): anim `/Game/SM2_Work/Tests/sani_before/hologram_planet/localbake/hologram_planet__anim` uses skeleton `.../localbake/hologram_planet_Skeleton`; meshes `.../localbake/hologram_planet` and `/Game/SM2_Work/Props/hologram_planet/hologram_planet` use `/Game/SM2_Work/Props/hologram_planet/hologram_planet_Skeleton`. All 78 anim tracks exist on the mesh (79 bones; mesh-only bone `hologram_planet`), so marking the skeletons compatible would make it play. A test of exactly that (22:43) worked (gaveUp=0) but was **reverted** at 22:46 from `.bak1` (SHA-256 verified identical to the originals; the `.bak1` files stay next to the two skeleton .uasset files). The plugin shows the stock thumbnail and logs the mismatch, which is the intended behaviour.
+  - Project scan (39,272 anims, 2,557 skeletal meshes, 954 skeletons): only hologram_planet has this split-skeleton pattern. Also without any mesh: `/Game/Characters/Mesh/SK_Sci_Fi_Cyborg_03_Skeleton` (12 anims, no mesh and no same-name skeleton anywhere; stock thumbnail) and the engine tutorial `TutorialTPP_Skeleton` (2 anims).
+  - Windows Firewall prompt for Unreal Insights: gone at 22:40 KST (no window, Insights not running, no firewall rule added).
   - **Settings tooltip:** the on-screen hover could not be captured. Slate shows tooltips only in the foreground app, and Windows refused to bring the editor forward from a background process. The row hover highlight is visible in `btl_shots\v22_tooltip_diskcache*.png`. Needs a manual check by Baegovda.
-- A Windows Firewall prompt for **Unreal Insights** (from the trace export) is open on the PC. Left for Baegovda; either answer is fine for the plugin.
 
 ## Next steps
 1. Manual tooltip check by Baegovda (hover a setting on the BongThumbLive settings page).
