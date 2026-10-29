@@ -1,0 +1,7 @@
+Binaries/
+Intermediate/
+*.bak*
+*.pdb
+*.zip
+Saved/
+.vs/

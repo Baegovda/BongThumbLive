@@ -1,0 +1,29 @@
+{
+	"FileVersion": 3,
+	"Version": 3,
+	"VersionName": "2.1",
+	"FriendlyName": "BongThumbLive",
+	"Description": "Live looping Content Browser thumbnails: Animation Sequences/Montages play, time-driven Materials animate, Niagara and Cascade particle systems simulate. Settings: Project Settings > Plugins > Bong Thumb Live.",
+	"Category": "Editor",
+	"CreatedBy": "Lalamold",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"EngineVersion": "5.7.0",
+	"Modules": [
+		{
+			"Name": "BongThumbLive",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "Niagara",
+			"Enabled": true
+		}
+	]
+}
