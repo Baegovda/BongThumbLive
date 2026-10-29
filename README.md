@@ -18,7 +18,7 @@ Live, looping Content Browser thumbnails:
   - After an editor restart, cached animations play **without loading the animation or its mesh**.
   - An entry is invalidated automatically when the asset, its mesh or its skeleton changes. Deleted and renamed assets are cleaned up.
   - Total size is capped (default 2048 MB) with LRU, where "recently used" means "last shown in a visible tile".
-- **GPU playback.** Cached frames live in GPU atlases, uploaded once. Each frame only copies one 256x256 cell into the tile, with no re-render and no readback. Measured: 86 animated tiles at ~117 editor fps (8.5 ms frames), with about 700 MB of GPU frames. The frame budget is spent only on generating new frames.
+- **GPU playback.** Cached frames live in GPU atlases, uploaded once. Each frame only copies one atlas cell (128x128 by default) into the tile, with no re-render and no readback. Measured: 86 animated tiles at ~117 editor fps (8.5 ms frames), with about 700 MB of GPU frames. The frame budget is spent only on generating new frames.
 - **Content Browser button.** A settings icon left of the lock icon opens the plugin settings.
 - **Korean settings UI.** Categories are 기본 (Basic), 재생 (Playback), 캐시 (Cache), 성능 (Performance) and 고급 (Advanced), with one-line tooltips.
 - The cache section of the settings page shows the cache folder, an "open folder" button and a "clear cache" (캐시 비우기) button.
