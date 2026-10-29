@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-30 04:35 KST (Asia/Seoul).
+Last update: 2026-10-30 04:50 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -197,3 +197,11 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 - **Measurement** (`Tools/btl_scroll_test.py` + `btl_scroll_run.ps1 -Tag X` + `btl_diff.py X`; pairs of shots 0.3 s apart, count of tile-sized changed blobs, /Game/SM2_Work, 27 anim tiles at bottom): before1 (pkg16) after scroll-to-bottom 10-13 moving tiles (top view 24); after1 (pkg17) 18-24 moving at bottom, 24-27 at top. Status after1: `pushTargetSizes=256x256:45,160x160:24`. Remaining still tiles = near-static idle/aim poses and hologram_planet (stock icon, intended).
 - Backups: source `BongThumbLiveCache.h.bak2`, `BongThumbLiveCache.cpp.bak4`, `BongThumbLiveModule.h.bak5`, `BongThumbLiveModule.cpp.bak7`; binaries `.bak14` = pkg16. Shots: PC `%TEMP%\btl_shots\scr_before1_*`, `scr_after1_*`, `diff_*`.
 - Next: user confirms by scrolling in their own browser; no release unless asked.
+## Cold cache: scrolled-in tiles never load (DONE 2026-10-30 04:50 KST, pkg18 deployed)
+- User (04:3x KST): "여전히 안불러옴. 매번 테스트할때마다 캐시 비우고 해" -> **every test run must start with an empty disk cache** (`Tools/btl_cold_run.ps1 -Tag X` deletes the files in `Saved\BongThumbLive\Cache` first; plugin cache only). Test = /Game/Props (CB filter Animation Sequence persists, 413 items), 6 scroll steps of 4 rows, Status + DumpCache each step (`Tools/btl_cold_test.py`); diff `Tools/btl_colddiff.py`.
+- The user's own session log (copied to PC `%TEMP%\btl_user_session_0434.log`) showed `visible ... loaded=116 pending=271 inflight=0` for >30 s: auto-load stalled.
+- **Root cause (measured, before1 = pkg17 cold):** `ownedAnimRoots=12` all the time -> PumpAutoLoads breaks at the 12 plugin-loaded-animation cap, `pending` 40-47 with `inflight=0`. Slots were held by anims scrolled away (released only after 30 s off screen) and by anims still generating, and generation finished one anim fully before starting the next (FillTargetPath). The visible queue also kept every tile ever shown. Result: `newTileToShown waiting=5..8` 12.6 s after each scroll, max 62.9 s.
+- **Fix (pkg18):** (1) Fill: visible tiles with < 12 frames first (fewest first) get a coarse pass of 12 evenly spaced frames (`FillFrames(..., CoarseCount)`), so a new tile moves (choppy) right away and is refined later; attempts/tick 3->6. (2) Off-screen plugin-loaded anims released after 3 s (was 30 s); cap 12 unchanged. (3) PumpAutoLoads drops visible-queue anim entries no longer on screen (re-queued when shown again). Status: `coarseRenders=`.
+- **Cold numbers:** before1: pending 40-47, ownedAnimRoots 12, waiting 5-8 tiles at +12.6 s every step, newTileToShown avg 11.5 s max 62.9 s. after1: pending 0, ownedAnimRoots 0, waiting 0 at every status, newTileToShown avg 3.1 s max 10.0 s (max = initial view during cold DDC anim compression; scrolled-in tiles avg ~0.6 s vs ~16 s before).
+- Backups: `BongThumbLiveCache.cpp.bak5`, `BongThumbLiveModule.cpp.bak8`, `BongThumbLiveRenderer.cpp.bak7`, `Public/BongThumbLiveRenderer.h.bak3`, `BongThumbLiveModule.h.bak6`, `BongThumbLiveCache.h.bak3` (the two .h backups were copied from the clone = pkg17 content); binaries `.bak15` = pkg17.
+- Note: I closed the user's own UE_VFX_57 editor (CloseMainWindow, closed cleanly) to run tests.

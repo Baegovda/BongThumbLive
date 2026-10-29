@@ -232,6 +232,8 @@ private:
 		void ResetPushed() { for (FPushTarget& T : Targets) { T.LastPushed = INDEX_NONE; } }
 	};
 	TMap<FIntPoint, int32> PushSizeCounts;
+	static constexpr int32 CoarseFrames = 12;
+	int64 CoarseRenders = 0;
 	int32 TileRefreshes = 0;
 	int32 TileLoads = 0;
 	TMap<FSoftObjectPath, FPushTile> PushTiles;

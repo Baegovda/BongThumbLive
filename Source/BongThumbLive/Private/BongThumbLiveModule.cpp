@@ -1629,7 +1629,9 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 		{
 			return Now - Info.LastUse > 10.0;
 		}
-		if (Now - Info.LastUse > 30.0)
+		// Animations are touched every tick while on screen: off screen for 3 s = scrolled away. Free the slot (cap of
+		// 12 plugin-loaded animations) for tiles on screen; partial frames stay in the memory cache.
+		if (Now - Info.LastUse > 3.0)
 		{
 			return true;
 		}
@@ -1900,6 +1902,23 @@ void FBongThumbLiveModule::PumpAutoLoads()
 	}
 	const int32 Batch = FMath::Clamp(Settings->AutoLoadBatchSize, 1, 64);
 	TWeakPtr<bool> WeakAlive = AliveToken;
+	// Animation tiles that were shown but scrolled away before their load started: drop them from the visible queue
+	// (they are queued again when shown again), so the loads go to what is on screen now.
+	if (VisiblePending.Num() > 0 && Settings->bUseFrameCache)
+	{
+		TSet<FSoftObjectPath> OnScreen(VisibleAnimPaths);
+		for (int32 i = VisiblePending.Num() - 1; i >= 0; --i)
+		{
+			const FSoftObjectPath* P = PendingAnimPaths.Find(VisiblePending[i]);
+			if (P && !OnScreen.Contains(*P))
+			{
+				VisibleSeen.Remove(VisiblePending[i]);
+				PendingAnimPaths.Remove(VisiblePending[i]);
+				VisiblePending.RemoveAt(i, EAllowShrinking::No);
+				++VisibleDropped;
+			}
+		}
+	}
 	while (InFlightLoads < Batch && (VisiblePending.Num() > 0 || PendingPackages.Num() > 0))
 	{
 		// Thumbnails actually on screen first, then the rest of the opened folder.

@@ -39,7 +39,7 @@ class UBongThumbLiveRenderer : public UDefaultSizedThumbnailRenderer
 	virtual void BeginDestroy() override;
 
 	/** Renders missing frames of a cache entry off-screen until Deadline (starting at StartFrame); returns frames done. */
-	static int32 FillFrames(UAnimSequenceBase* Anim, FBongCacheEntry& Entry, double Deadline, int32 StartFrame);
+	static int32 FillFrames(UAnimSequenceBase* Anim, FBongCacheEntry& Entry, double Deadline, int32 StartFrame, int32 CoarseCount = 0);
 
 	/** Frame cache (GPU atlas per animation, see BongThumbLiveCache.h). */
 	static FString GetCacheStats();

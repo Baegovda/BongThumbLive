@@ -1707,6 +1707,25 @@ void FBongThumbCache::Fill(const FTickParams& Params)
 	{
 		Order.Add(Params.Hovered);
 	}
+	// Visible tiles that have (almost) nothing yet come first, fewest frames first: every newly shown tile (scrolling,
+	// cold cache) gets a coarse set of frames right away instead of waiting until earlier tiles are complete.
+	{
+		TArray<TPair<int32, FSoftObjectPath>, TInlineAllocator<64>> Starving;
+		for (const FSoftObjectPath& P : Params.ActivePaths)
+		{
+			const FBongCacheEntry* Existing = Find(P);
+			const int32 Have = Existing ? Existing->NumValid : 0;
+			if ((!Existing || !Existing->IsComplete()) && Have < CoarseFrames && !LoadsInFlight.Contains(P) && P.ResolveObject())
+			{
+				Starving.Add({ Have, P });
+			}
+		}
+		Starving.StableSort([](const TPair<int32, FSoftObjectPath>& A, const TPair<int32, FSoftObjectPath>& B) { return A.Key < B.Key; });
+		for (const TPair<int32, FSoftObjectPath>& S : Starving)
+		{
+			Order.AddUnique(S.Value);
+		}
+	}
 	if (!FillTargetPath.IsNull() && ActiveSet.Contains(FillTargetPath))
 	{
 		Order.AddUnique(FillTargetPath); // finish one animation before starting the next
@@ -1718,7 +1737,7 @@ void FBongThumbCache::Fill(const FTickParams& Params)
 	int32 Attempts = 0;
 	for (const FSoftObjectPath& Path : Order)
 	{
-		if (Attempts >= 3 || FPlatformTime::Seconds() >= Params.FillDeadline)
+		if (Attempts >= 6 || FPlatformTime::Seconds() >= Params.FillDeadline)
 		{
 			break;
 		}
@@ -1745,8 +1764,16 @@ void FBongThumbCache::Fill(const FTickParams& Params)
 		}
 		++Attempts;
 		const int32 Start = E->FrameIndexAt((float)BongLoopTime(E->Length, Path == Params.Hovered));
-		const int32 Done = UBongThumbLiveRenderer::FillFrames(Anim, *E, Params.FillDeadline, Start);
-		FillTargetPath = E->IsComplete() ? FSoftObjectPath() : Path;
+		const bool bCoarse = E->NumValid < CoarseFrames && E->NumFrames > CoarseFrames;
+		const int32 Done = UBongThumbLiveRenderer::FillFrames(Anim, *E, Params.FillDeadline, Start, bCoarse ? CoarseFrames : 0);
+		if (bCoarse)
+		{
+			CoarseRenders += Done;
+		}
+		else
+		{
+			FillTargetPath = E->IsComplete() ? FSoftObjectPath() : Path;
+		}
 		if (Done > 0)
 		{
 			Renders += Done;
@@ -1780,10 +1807,10 @@ FString FBongThumbCache::GetStats() const
 	{
 		SizesStr += FString::Printf(TEXT("%s%dx%d:%d"), SizesStr.IsEmpty() ? TEXT("") : TEXT(","), Pair.Key.X, Pair.Key.Y, Pair.Value);
 	}
-	return FString::Printf(TEXT("memory cache: %s entries=%d (complete %d, from disk %d) frames=%lld GPU=%.1f MB (+cpu in flight %.1f MB) / %d MB, evictions=%lld, playing tiles=%d, pushed frames=%lld, draw hits=%lld, renders=%lld, notStored(compiling)=%lld, overBudget=%lld, tileTexturesCreated=%d, tileRefreshes=%d, tileLoads=%d, pushTargetSizes=%s\n")
+	return FString::Printf(TEXT("memory cache: %s entries=%d (complete %d, from disk %d) frames=%lld GPU=%.1f MB (+cpu in flight %.1f MB) / %d MB, evictions=%lld, playing tiles=%d, pushed frames=%lld, draw hits=%lld, renders=%lld, notStored(compiling)=%lld, overBudget=%lld, tileTexturesCreated=%d, tileRefreshes=%d, tileLoads=%d, pushTargetSizes=%s, coarseRenders=%lld\n")
 		TEXT("disk cache: %s %s files=%d %.1f / %d MB, hits=%lld misses=%lld stale=%lld writes=%lld writeFails=%lld loading=%d avgDecode=%.1f ms, folder=%s"),
 		S->bUseFrameCache ? TEXT("on") : TEXT("OFF"), Entries.Num(), Complete, FromDisk, Frames, MemBytes / (1024.0 * 1024.0), InFlightCpuBytes / (1024.0 * 1024.0),
-		S->CacheMemoryMB, Evictions, PushTiles.Num(), PushedFrames, DrawHits, Renders, NotStoredBusy, OverBudget, GBongTileTexturesCreated.load(), TileRefreshes, TileLoads, SizesStr.IsEmpty() ? TEXT("-") : *SizesStr,
+		S->CacheMemoryMB, Evictions, PushTiles.Num(), PushedFrames, DrawHits, Renders, NotStoredBusy, OverBudget, GBongTileTexturesCreated.load(), TileRefreshes, TileLoads, SizesStr.IsEmpty() ? TEXT("-") : *SizesStr, CoarseRenders,
 		S->bEnableDiskCache ? TEXT("on") : TEXT("OFF"), bIndexReady ? TEXT("ready") : TEXT("scanning"), Index.Num(), DiskBytes / (1024.0 * 1024.0), S->MaxDiskCacheMB,
 		DiskHits, DiskMisses, DiskStale, DiskWrites, DiskWriteFails, LoadsInFlight.Num() + PendingUploads.Num(),
 		DiskHits > 0 ? DiskDecodeMsTotal / DiskHits : 0.0, *GetCacheDir());

@@ -729,7 +729,7 @@ bool UBongThumbLiveRenderer::HasCachedFrames(const UObject* Object)
 	return Entry && Entry->NumValid > 0;
 }
 
-int32 UBongThumbLiveRenderer::FillFrames(UAnimSequenceBase* Anim, FBongCacheEntry& Entry, double Deadline, int32 StartFrame)
+int32 UBongThumbLiveRenderer::FillFrames(UAnimSequenceBase* Anim, FBongCacheEntry& Entry, double Deadline, int32 StartFrame, int32 CoarseCount)
 {
 	if (!FBongThumbLiveModule::IsObjectSafe(Anim) || Entry.NumFrames <= 0)
 	{
@@ -755,9 +755,12 @@ int32 UBongThumbLiveRenderer::FillFrames(UAnimSequenceBase* Anim, FBongCacheEntr
 	const bool bStable = GetDefault<UBongThumbLiveSettings>()->bStableFraming;
 	const int32 Size = FBongThumbCache::TileSize;
 	int32 Done = 0;
-	for (int32 n = 0; n < Entry.NumFrames; ++n)
+	// CoarseCount > 0: only CoarseCount evenly spaced frames (a newly shown tile starts moving, choppy, within a few
+	// frames; the remaining frames are filled in later passes).
+	const int32 Count = CoarseCount > 0 ? FMath::Min(CoarseCount, Entry.NumFrames) : Entry.NumFrames;
+	for (int32 n = 0; n < Count; ++n)
 	{
-		const int32 Frame = (FMath::Max(StartFrame, 0) + n) % Entry.NumFrames;
+		const int32 Frame = CoarseCount > 0 ? (int32)(((int64)n * Entry.NumFrames) / Count) : (FMath::Max(StartFrame, 0) + n) % Entry.NumFrames;
 		if (Entry.Valid[Frame])
 		{
 			continue;
