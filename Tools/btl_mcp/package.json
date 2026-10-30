@@ -1,0 +1,11 @@
+{
+  "name": "btl_mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stdio MCP client for McpAutomationBridge 0.5.30 (see btl_mcp_client.mjs)",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "unreal-engine-mcp-server": "0.5.30"
+  }
+}

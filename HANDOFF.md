@@ -19,6 +19,9 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 2. **GitHub access.** The repo is private (owner Baegovda). The PC already has `gh` 2.95 + git 2.47 logged in and able to push: verify with `gh auth status` on the PC. Clone if missing: `gh repo clone Baegovda/BongThumbLive C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo`. If `gh` is logged out, ask Baegovda to run `gh auth login` on the PC (do not handle tokens yourself). A GitHub connector on your side is optional (read-only convenience).
 3. **Required tools on the PC** (all already installed): UE 5.7 at `C:\Program Files\Epic Games\UE_5.7`; RunUAT `C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\RunUAT.bat` (needs Visual Studio 2022 C++ toolchain, present); git, gh; Python 3.10 (`C:\Program Files\Python310\python.exe`) for log parsing.
 4. **Test tools live in the repo** under `Tools/` (bench script, log parser, watchdog). Copy them to `C:\Users\Revaptor_FX\AppData\Local\Temp\` before running (the bench script reads its config from there).
+   - Temp-only helpers that used to exist only in `%TEMP%` are now in `Tools/` too (2026-10-30 audit): `btl_verify3.py` (timed Status/screenshot/settings run, reads `Temp\btl_run.txt`), `btl_diag2.py` (obj list / memreport / GC diag run), `btl_rep.ps1` (exact-string replace helper, keeps BOM), `btl_sm2_diag.py` (read-only stuck-tile diag in `/Game/SM2_Work`), `btl_skel_fix.py` (**saves** the two hologram_planet skeletons' compatible list — asset write, only when asked, back up first).
+   - **Unreal MCP client (in progress section below):** `%TEMP%\btl_mcp` = `npm install unreal-engine-mcp-server@0.5.30` (version must match the project plugin McpAutomationBridge 0.5.30) + `btl_mcp_client.mjs` (stdio client, `node btl_mcp_client.mjs <tool> '<json>'`). Needs Node.js on the PC. Repo copy: `Tools/btl_mcp/` (`btl_mcp_client.mjs` + `package.json` with the server pinned to 0.5.30): copy to `%TEMP%\btl_mcp`, `npm install`. PC Node was v24.14.1 (2026-10-30).
+   - **Bot side:** nothing on your box is required (no box tools, no MCP config, no cron/systemd). The old account had the connectors cursor-github (read-only repo reads), Gmail, Notion and X; BongThumbLive work does not depend on Gmail/Notion/X. Secrets: none in the repo; the PC `gh` login belongs to Baegovda (never handle tokens). Old box extras that are not transferred and not needed: `/workspace/bongthumb` (~143 MB screenshots/logs/`pkg*_src.tgz` snapshots, all source is in git), `/workspace/animthumb` (AnimThumbLive predecessor tests), `/workspace/btl*`.
 5. Then run the Resume checklist below.
 
 ## Access (for a new bot that only has the repo URL)
@@ -41,7 +44,7 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 - Project: `K:\Unreal Projects\UE_VFX_57\UE_VFX_57.uproject`; engine `C:\Program Files\Epic Games\UE_5.7`.
 - Disk cache: `K:\Unreal Projects\UE_VFX_57\Saved\BongThumbLive\Cache`.
 - Full plugin backups: `K:\Unreal Projects\UE_VFX_57\PluginBackups\BongThumbLive.bak1..bak7`.
-- Test/diag scripts: `C:\Users\Revaptor_FX\AppData\Local\Temp\btl_*.py|ps1`.
+- Test/diag scripts: `C:\Users\Revaptor_FX\AppData\Local\Temp\btl_*.py|ps1` (repo copies in `Tools/`; copy them to Temp if missing).
   - `btl_verify3.py` = timed run: Status dumps, screenshots, settings page; RUN number in `btl_run.txt`.
   - `btl_watchdog.ps1` = memory watchdog that kills the editor above a limit.
   - `btl_rep.ps1` = safe exact-string replace helper.
