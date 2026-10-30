@@ -992,8 +992,8 @@ public:
 			}
 			OutDrawElements.PushClip(FSlateClippingZone(D.Clip)); // tiles half scrolled out stay inside the asset view
 			const FPaintGeometry Geo = AllottedGeometry.ToPaintGeometry();
-			FSlateDrawElement::MakeLines(OutDrawElements, LayerId, Geo, Ring, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, 0.35f * Fade), true, Thick + 1.5f);
-			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, Geo, Ring, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.12f * Fade), true, Thick);
+			if (Style == EBongSpinnerStyle::Spin) FSlateDrawElement::MakeLines(OutDrawElements, LayerId, Geo, Ring, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, 0.35f * Fade), true, Thick + 1.5f);
+			if (Style == EBongSpinnerStyle::Spin) FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, Geo, Ring, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.12f * Fade), true, Thick);
 			const FLinearColor Fg(Col.R, Col.G, Col.B, 0.9f * Fade);
 			switch (Style)
 			{

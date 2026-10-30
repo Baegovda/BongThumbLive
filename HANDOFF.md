@@ -253,3 +253,5 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 - New settings (재생 category, per-user ini, read every paint so they apply without restart): `LoadingSpinnerColor` (FColor, default 255,210,0 yellow, alpha hidden), `LoadingSpinnerStyle` (EBongSpinnerStyle: Spin default / Pulse / Dots / Bar), `LoadingSpinnerSpeed` (0.1-5, default 1 = 1.25 cycles/s as before). Size/radius unchanged. Caps unchanged.
 - Backups: `BongThumbLiveSettings.h.bak4`, `BongThumbLiveModule.cpp.bak12` (pre-change). Edit script `Tools/btl_spin_color_edit.py`.
 - Built OK as `%TEMP%\BongThumbLive_pkg23`. Status: NOT yet deployed / live-verified (waiting for editor lock `editor-free`/`bonglodge-free`). Next: close editor gracefully, back up binaries as next .bakN, copy pkg23 Binaries\Win64, relaunch, screenshot yellow spinner + change colour/style in settings.
+
+- pkg24 (21:58 KST): faint back ring now drawn only for the Spin style (backup BongThumbLiveModule.cpp.bak13). Built OK %TEMP%\BongThumbLive_pkg24. NOT deployed / NOT verified live: lock was already taken by 'bonglodge 2026-10-30 21:55:51'. Deploy pkg24 (not pkg23) when the lock is free.
