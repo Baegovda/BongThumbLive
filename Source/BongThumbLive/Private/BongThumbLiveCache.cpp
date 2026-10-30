@@ -1696,6 +1696,10 @@ void FBongThumbCache::Push(const FTickParams& Params, const TSet<FSoftObjectPath
 	});
 }
 
+static int32 GBongFirstFrameFirst = 0;
+static FAutoConsoleVariableRef CVarBongFirstFrameFirst(TEXT("BongThumbLive.FirstFrameFirst"), GBongFirstFrameFirst,
+	TEXT("1 = render one frame for every visible tile with none before coarse/refine passes."));
+
 void FBongThumbCache::Fill(const FTickParams& Params)
 {
 	if (!Params.bAllowFill || FPlatformTime::Seconds() >= Params.FillDeadline)
@@ -1765,7 +1769,8 @@ void FBongThumbCache::Fill(const FTickParams& Params)
 		++Attempts;
 		const int32 Start = E->FrameIndexAt((float)BongLoopTime(E->Length, Path == Params.Hovered));
 		const bool bCoarse = E->NumValid < CoarseFrames && E->NumFrames > CoarseFrames;
-		const int32 Done = UBongThumbLiveRenderer::FillFrames(Anim, *E, Params.FillDeadline, Start, bCoarse ? CoarseFrames : 0);
+		const bool bFirstOnly = GBongFirstFrameFirst != 0 && E->NumValid == 0 && E->NumFrames > 1;
+		const int32 Done = UBongThumbLiveRenderer::FillFrames(Anim, *E, Params.FillDeadline, Start, bFirstOnly ? 1 : (bCoarse ? CoarseFrames : 0));
 		if (bCoarse)
 		{
 			CoarseRenders += Done;

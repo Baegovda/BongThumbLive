@@ -116,6 +116,27 @@ static float GBongSceneBudgetMs = 6.f;
 static FAutoConsoleVariableRef CVarBongSceneBudgetMs(
 	TEXT("BongThumbLive.SceneRenderBudgetMs"), GBongSceneBudgetMs,
 	TEXT("Render-thread time (ms per engine frame) thumbnail scene renders may use. Default 6."));
+static float GBongSceneBudgetWaitingMs = 0.f;
+static FAutoConsoleVariableRef CVarBongSceneBudgetWaitingMs(
+	TEXT("BongThumbLive.SceneRenderBudgetWaitingMs"), GBongSceneBudgetWaitingMs,
+	TEXT("Render-thread budget while visible anim tiles still wait for their first frame (0 = use SceneRenderBudgetMs)."));
+static int32 GBongReleaseAfterCoarse = 2; // A/B 2026-10-30: scrolled-in tiles 0.34 s -> 0.09 s avg
+static FAutoConsoleVariableRef CVarBongReleaseAfterCoarse(
+	TEXT("BongThumbLive.ReleaseAfterCoarse"), GBongReleaseAfterCoarse,
+	TEXT("While visible tiles wait for one of the 12 anim slots (cap unchanged): 1 = free a slot once its coarse frames exist (reloads later), 2 = free a finished+saved anim's slot at once instead of after 3 s."));
+static int32 GBongTileTrace = 0;
+static FAutoConsoleVariableRef CVarBongTileTrace(TEXT("BongThumbLive.TileTrace"), GBongTileTrace, TEXT("1 = log per-tile timing (BTLT lines)."));
+static bool GBongTilesWaiting = false;
+static int64 GBongEarlyReleases = 0;
+struct FBongTileTraceT { double T[4] = { 0, 0, 0, 0 }; };
+static TMap<FName, FBongTileTraceT> GBongTileTraces;
+void FBongThumbLiveModule::NoteTileTrace(FName Package, int32 Stage)
+{
+	if (!GBongTileTrace || Stage < 0 || Stage > 3) { return; }
+	if (GBongTileTraces.Num() > 4096) { GBongTileTraces.Reset(); }
+	double& V = GBongTileTraces.FindOrAdd(Package).T[Stage];
+	if (V == 0.0) { V = FPlatformTime::Seconds(); }
+}
 static uint64 GBongSceneFrame = ~0ull;
 static int32 GBongScenesThisFrame = 0;
 static int32 GBongSceneAllowance = 2;
@@ -133,7 +154,7 @@ static void BongSceneGovernorFrame()
 	GBongSceneFrame = GFrameCounter;
 	GBongScenesThisFrame = 0;
 	const float Cost = FMath::Max(0.05f, GBongSceneRtMs.load(std::memory_order_relaxed));
-	GBongSceneAllowance = FMath::Clamp(FMath::FloorToInt(FMath::Clamp(GBongSceneBudgetMs, 0.5f, 100.f) / Cost), 1, FMath::Clamp(GBongMaxScenesPerFrame, 1, 128));
+	GBongSceneAllowance = FMath::Clamp(FMath::FloorToInt(FMath::Clamp((GBongTilesWaiting && GBongSceneBudgetWaitingMs > 0.f) ? GBongSceneBudgetWaitingMs : GBongSceneBudgetMs, 0.5f, 100.f) / Cost), 1, FMath::Clamp(GBongMaxScenesPerFrame, 1, 128));
 }
 
 bool FBongThumbLiveModule::CanSceneRender()
@@ -174,8 +195,8 @@ void FBongThumbLiveModule::NoteSceneRender()
 
 FString FBongThumbLiveModule::GetRenderGovernorStats()
 {
-	return FString::Printf(TEXT("sceneRenders: %lld, rt %.2f ms each, allowance %d/frame (budget %.1f ms, max %d), deferred=%lld"),
-		GBongScenesRendered, GBongSceneRtMs.load(), GBongSceneAllowance, GBongSceneBudgetMs, GBongMaxScenesPerFrame, GBongScenesDeferred);
+	return FString::Printf(TEXT("sceneRenders: %lld, rt %.2f ms each, allowance %d/frame (budget %.1f ms, max %d), deferred=%lld, waiting=%d earlyReleases=%lld"),
+		GBongScenesRendered, GBongSceneRtMs.load(), GBongSceneAllowance, GBongSceneBudgetMs, GBongMaxScenesPerFrame, GBongScenesDeferred, GBongTilesWaiting ? 1 : 0, GBongEarlyReleases);
 }
 
 float FBongThumbLiveModule::GetLoopTime(const UAnimSequenceBase* Anim)
@@ -238,7 +259,7 @@ static bool BongIsAnimDataReady(const UAnimSequence* Seq)
 	if (!BongAnyAnimCompiling())
 	{
 		GBongAnimNotReadySince.Remove(Key);
-		GBongAnimReady.Add(Key);
+		GBongAnimReady.Add(Key); FBongThumbLiveModule::NoteTileTrace(Seq->GetOutermost()->GetFName(), 2);
 		return true;
 	}
 	const double Now = FPlatformTime::Seconds();
@@ -256,7 +277,7 @@ static bool BongIsAnimDataReady(const UAnimSequence* Seq)
 	if (Seq->IsCompressedDataValid())
 	{
 		GBongAnimNotReadySince.Remove(Key);
-		GBongAnimReady.Add(Key);
+		GBongAnimReady.Add(Key); FBongThumbLiveModule::NoteTileTrace(Seq->GetOutermost()->GetFName(), 2);
 		return true;
 	}
 	if (GBongAnimNotReadySince.Num() > 8192)
@@ -1829,6 +1850,7 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 			}
 		}
 		PrevVisibleAnims = MoveTemp(NowVisible);
+		GBongTilesWaiting = VisibleSince.Num() > 0;
 		for (auto It = VisibleSince.CreateIterator(); It; ++It)
 		{
 			if (!PrevVisibleAnims.Contains(It.Key()))
@@ -1864,6 +1886,13 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 				++AnnounceLatencyCount;
 				AnnounceLatencySum += Latency;
 				AnnounceLatencyMax = FMath::Max(AnnounceLatencyMax, Latency);
+				if (GBongTileTrace)
+				{
+					const FName Pkg(*Path.GetLongPackageName());
+					const FBongTileTraceT* Tr = GBongTileTraces.Find(Pkg);
+					auto Rel = [&](int32 i) { return (Tr && Tr->T[i] > 0.0) ? Tr->T[i] - Since : -999.0; };
+					UE_LOG(LogBongThumbLive, Display, TEXT("BTLT tile=%s shown=%.3f q=%.3f l=%.3f r=%.3f f=%.3f"), *Pkg.ToString(), Latency, Rel(0), Rel(1), Rel(2), Rel(3));
+				}
 			}
 			It.RemoveCurrent();
 		}
@@ -1873,6 +1902,7 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 	// animations as soon as their frames are cached (the cache plays them without the asset), preview meshes after
 	// 10 s without use, anything after 30 s off screen, everything under memory pressure.
 	const bool bCacheOn = Settings->bUseFrameCache;
+	const bool bSlotsWanted = GBongReleaseAfterCoarse != 0 && VisiblePending.Num() > 0 && BongOwned::Num(false) >= 12;
 	BongOwned::ReleaseIf([&](const BongOwned::FInfo& Info)
 	{
 		if (bMemoryPressure)
@@ -1888,6 +1918,16 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 		if (Now - Info.LastUse > 3.0)
 		{
 			return true;
+		}
+		if (bSlotsWanted && bCacheOn)
+		{
+			const FBongCacheEntry* Entry = Cache.Find(Info.AssetPath);
+			const bool bDone = Entry && Entry->IsComplete() && (Entry->bNoDisk || Entry->bSaveStarted || !Settings->bEnableDiskCache);
+			if (GBongReleaseAfterCoarse == 2 ? bDone : (Entry && Entry->NumFrames > 0 && Entry->NumValid >= FMath::Min(12, Entry->NumFrames)))
+			{
+				++GBongEarlyReleases;
+				return true; // coarse frames shown; refined after a reload when a slot is free
+			}
 		}
 		if (bCacheOn && Now - Info.TrackedAt > 3.0)
 		{
@@ -1914,7 +1954,14 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 			{
 				continue;
 			}
-			VisiblePending.Add(PackageName);
+			if (GBongReleaseAfterCoarse && Entry && Entry->NumValid > 0)
+			{
+				VisiblePending.Insert(PackageName, 0); // already moving: after the tiles that show nothing yet
+			}
+			else
+			{
+				VisiblePending.Add(PackageName);
+			}
 			PendingAnimPaths.Add(PackageName, Path);
 		}
 	}
@@ -2208,6 +2255,7 @@ void FBongThumbLiveModule::PumpAutoLoads()
 			continue;
 		}
 		++InFlightLoads;
+		NoteTileTrace(PackageName, 0);
 		if (!AnimAssetPath.IsNull())
 		{
 			BongOwned::Track(PackageName, AnimAssetPath, /*bMesh*/ false); // loaded by us: released when cached / unused
@@ -2220,6 +2268,7 @@ void FBongThumbLiveModule::PumpAutoLoads()
 					if (FBongThumbLiveModule* M = FBongThumbLiveModule::GetPtr())
 					{
 						M->InFlightLoads = FMath::Max(0, M->InFlightLoads - 1);
+						FBongThumbLiveModule::NoteTileTrace(Name, 1);
 						if (Result != EAsyncLoadingResult::Succeeded)
 						{
 							UE_LOG(LogBongThumbLive, Verbose, TEXT("BongThumbLive auto-load: %s failed (%d)."), *Name.ToString(), (int32)Result);

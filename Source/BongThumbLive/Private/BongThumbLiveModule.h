@@ -96,6 +96,8 @@ public:
 	static void BeginSceneRender();
 	static void NoteSceneRender();
 	static FString GetRenderGovernorStats();
+	/** Speed trace (BongThumbLive.TileTrace): 0 load started, 1 load done, 2 anim data ready, 3 first frame stored. */
+	static void NoteTileTrace(FName Package, int32 Stage);
 
 private:
 	bool Tick(float DeltaTime);

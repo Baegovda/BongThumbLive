@@ -399,6 +399,8 @@ static FAutoConsoleVariableRef CVarBongRecreateRenderState(
 	GBongRecreateRenderState,
 	TEXT("1 = re-create the preview mesh render state for every rendered frame (default; correct pose for every cached frame). 0 = only update the pose (faster, but frames rendered in the same tick can repeat a pose)."));
 
+static uint64 GBongLastCheapPoseFrame = ~0ull;
+
 #include UE_INLINE_GENERATED_CPP_BY_NAME(BongThumbLiveRenderer)
 
 ABongThumbLiveMeshActor::ABongThumbLiveMeshActor(const FObjectInitializer& ObjectInitializer)
@@ -508,7 +510,12 @@ public:
 					const float BoundsZOffset = GetBoundsZOffset(FramingBounds);
 					PreviewActor->SetActorLocation(-FramingBounds.Origin + FVector(0, 0, BoundsZOffset), false);
 					Comp->UpdateBounds();
-					if (GBongRecreateRenderState != 0)
+					const bool bCheap = GBongRecreateRenderState == 0 || (GBongRecreateRenderState == 2 && GBongLastCheapPoseFrame != GFrameCounter);
+					if (GBongRecreateRenderState == 2 && bCheap)
+					{
+						GBongLastCheapPoseFrame = GFrameCounter; // 2 = pose-only update for the first render per engine frame only
+					}
+					if (!bCheap)
 					{
 						Comp->RecreateRenderState_Concurrent(); // old, slow path (re-creates the scene proxy every frame)
 					}
@@ -799,6 +806,10 @@ int32 UBongThumbLiveRenderer::FillFrames(UAnimSequenceBase* Anim, FBongCacheEntr
 		Canvas.Flush_GameThread();
 		FBongThumbLiveModule::NoteSceneRender();
 		Cache.StoreFrame(Entry, Frame, Resource, FIntRect(0, 0, Size, Size), GBongFillScene->GetMesh());
+		if (Entry.NumValid == 1)
+		{
+			FBongThumbLiveModule::NoteTileTrace(Anim->GetOutermost()->GetFName(), 3);
+		}
 		++Done;
 	}
 	GBongFillSceneLastUse = FPlatformTime::Seconds();
