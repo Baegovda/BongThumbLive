@@ -17,6 +17,19 @@ enum class EBongThumbLiveMode : uint8
 	VisibleInBrowser UMETA(DisplayName = "브라우저에 보이는 것 전부"),
 };
 
+UENUM(BlueprintType)
+enum class EBongSpinnerStyle : uint8
+{
+	/** 원 위를 도는 호 (기본). */
+	Spin UMETA(DisplayName = "회전하는 호"),
+	/** 커졌다 작아지는 원. */
+	Pulse UMETA(DisplayName = "맥박 (커졌다 작아짐)"),
+	/** 원을 따라 도는 점 8개. */
+	Dots UMETA(DisplayName = "도는 점"),
+	/** 좌우로 오가는 막대. */
+	Bar UMETA(DisplayName = "막대 왕복"),
+};
+
 /**
  * Project Settings > Plugins > Bong Thumb Live
  * Stored per-user (Saved/Config/<Platform>Editor/EditorPerProjectUserSettings.ini) so it never dirties
@@ -97,6 +110,18 @@ public:
 	/** 썸네일이 처음 움직이기 시작할 때까지(첫 그림이 준비될 때까지) 썸네일 가운데에 작은 로딩 표시(빙글빙글 도는 원)를 보여 줍니다. 캐시가 비어 있으면 처음 몇 초가 걸릴 수 있는데, 이 표시로 기다리는 중인지 알 수 있습니다. 첫 그림이 나오면 바로 사라지고, 메모리를 더 쓰지 않습니다. */
 	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "재생", meta = (DisplayName = "로딩 표시 보이기", EditCondition = "bEnabled"))
 	bool bShowLoadingSpinner = true;
+
+	/** 로딩 표시 색입니다. 바로 적용됩니다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "재생", meta = (DisplayName = "로딩 표시 색", EditCondition = "bEnabled && bShowLoadingSpinner", HideAlphaChannel))
+	FColor LoadingSpinnerColor = FColor(255, 210, 0, 255);
+
+	/** 로딩 표시 모양입니다. 바로 적용됩니다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "재생", meta = (DisplayName = "로딩 표시 모양", EditCondition = "bEnabled && bShowLoadingSpinner"))
+	EBongSpinnerStyle LoadingSpinnerStyle = EBongSpinnerStyle::Spin;
+
+	/** 로딩 표시 움직임 빠르기입니다(1 = 기본). 바로 적용됩니다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "재생", meta = (DisplayName = "로딩 표시 속도", EditCondition = "bEnabled && bShowLoadingSpinner", ClampMin = "0.1", ClampMax = "5.0", UIMin = "0.25", UIMax = "3.0"))
+	float LoadingSpinnerSpeed = 1.0f;
 
 	/** 이펙트를 처음 보여 줄 때 미리 이만큼(초) 재생해 둡니다. 썸네일이 처음에 텅 비어 보이면 늘리세요. 늘리면 처음 표시가 조금 늦어집니다. */
 	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "재생", meta = (DisplayName = "이펙트 미리 재생 시간 (초)", EditCondition = "bEnabled", ClampMin = "0.0", ClampMax = "10.0", UIMin = "0.0", UIMax = "5.0"))

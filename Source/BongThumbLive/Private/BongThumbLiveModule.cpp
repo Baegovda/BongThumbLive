@@ -956,7 +956,12 @@ public:
 		}
 		const TSharedPtr<SWindow> Mine = Window.Pin();
 		const float Scale = FMath::Max(AllottedGeometry.Scale, 0.01f);
-		const float Spin = (float)FMath::Fmod(Now * 1.25, 1.0) * UE_TWO_PI; // 1.25 turns per second
+		const UBongThumbLiveSettings* SS = GetDefault<UBongThumbLiveSettings>();
+		const EBongSpinnerStyle Style = SS->LoadingSpinnerStyle;
+		const double Speed = FMath::Clamp((double)SS->LoadingSpinnerSpeed, 0.1, 5.0);
+		const FLinearColor Col = FLinearColor(FColor(SS->LoadingSpinnerColor.R, SS->LoadingSpinnerColor.G, SS->LoadingSpinnerColor.B, 255));
+		const float Phase = (float)FMath::Fmod(Now * 1.25 * Speed, 1.0); // 0..1, 1.25 cycles per second at speed 1
+		const float Spin = Phase * UE_TWO_PI;
 		TArray<FVector2f> Ring;
 		TArray<FVector2f> Arc;
 		for (const FBongSpinnerDraw& D : Module->GetSpinnerDraws())
@@ -989,7 +994,46 @@ public:
 			const FPaintGeometry Geo = AllottedGeometry.ToPaintGeometry();
 			FSlateDrawElement::MakeLines(OutDrawElements, LayerId, Geo, Ring, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, 0.35f * Fade), true, Thick + 1.5f);
 			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, Geo, Ring, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.12f * Fade), true, Thick);
-			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Arc, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.75f * Fade), true, Thick);
+			const FLinearColor Fg(Col.R, Col.G, Col.B, 0.9f * Fade);
+			switch (Style)
+			{
+			case EBongSpinnerStyle::Pulse:
+			{
+				const float P = 0.5f - 0.5f * FMath::Cos(Phase * UE_TWO_PI);
+				TArray<FVector2f> Circ;
+				for (int32 i = 0; i <= 32; ++i)
+				{
+					const float A = (float)i / 32.0f * UE_TWO_PI;
+					Circ.Add(C + FVector2f(FMath::Cos(A), FMath::Sin(A)) * (R * (0.35f + 0.65f * P)));
+				}
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Circ, ESlateDrawEffect::None, FLinearColor(Col.R, Col.G, Col.B, (0.4f + 0.55f * (1.0f - P)) * Fade), true, Thick);
+				break;
+			}
+			case EBongSpinnerStyle::Dots:
+			{
+				for (int32 k = 0; k < 8; ++k)
+				{
+					const float A = (float)k / 8.0f * UE_TWO_PI;
+					const float Lag = FMath::Fmod(Phase - (float)k / 8.0f + 1.0f, 1.0f); // head dot brightest
+					const FVector2f P0 = C + FVector2f(FMath::Cos(A), FMath::Sin(A)) * R;
+					TArray<FVector2f> Dot; Dot.Add(P0 - FVector2f(Thick * 0.5f / Scale, 0.f)); Dot.Add(P0 + FVector2f(Thick * 0.5f / Scale, 0.f));
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Dot, ESlateDrawEffect::None, FLinearColor(Col.R, Col.G, Col.B, (0.15f + 0.8f * (1.0f - Lag)) * Fade), true, Thick * 1.6f);
+				}
+				break;
+			}
+			case EBongSpinnerStyle::Bar:
+			{
+				const float X = FMath::Sin(Phase * UE_TWO_PI) * R * 0.6f;
+				TArray<FVector2f> Track; Track.Add(C + FVector2f(-R, 0.f)); Track.Add(C + FVector2f(R, 0.f));
+				TArray<FVector2f> Seg; Seg.Add(C + FVector2f(X - R * 0.4f, 0.f)); Seg.Add(C + FVector2f(X + R * 0.4f, 0.f));
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Track, ESlateDrawEffect::None, FLinearColor(Col.R, Col.G, Col.B, 0.25f * Fade), true, Thick);
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Seg, ESlateDrawEffect::None, Fg, true, Thick);
+				break;
+			}
+			default:
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Arc, ESlateDrawEffect::None, Fg, true, Thick);
+				break;
+			}
 			OutDrawElements.PopClip();
 		}
 		return LayerId + 3;

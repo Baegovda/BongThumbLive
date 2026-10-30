@@ -248,3 +248,8 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 - The newTileToShown **max** (15-21 s here, 8.6 s earlier) is dominated by tiles the Content Browser restores during editor startup (VisibleSince starts before the editor is idle); it is not the folder-click latency. Not fixed; a proper folder-click measurement needs the test to start from another folder.
 - Logs: `%TEMP%\btl_speed_p22a/p22b/p22off_a/p22off_b.log`. Tools: `Tools/btl_speed_run.ps1`, `btl_speed_test.py`, `btl_speed_parse.py`.
 - Rejected earlier (noise): FirstFrameFirst, SceneRenderBudgetWaitingMs 12, RecreateRenderState 2, AutoLoadBatchSize 8; ReleaseAfterCoarse 1 (hitches).
+
+## Spinner colour + style settings (pkg23, 2026-10-30 21:20 KST, user t224u/t225u)
+- New settings (재생 category, per-user ini, read every paint so they apply without restart): `LoadingSpinnerColor` (FColor, default 255,210,0 yellow, alpha hidden), `LoadingSpinnerStyle` (EBongSpinnerStyle: Spin default / Pulse / Dots / Bar), `LoadingSpinnerSpeed` (0.1-5, default 1 = 1.25 cycles/s as before). Size/radius unchanged. Caps unchanged.
+- Backups: `BongThumbLiveSettings.h.bak4`, `BongThumbLiveModule.cpp.bak12` (pre-change). Edit script `Tools/btl_spin_color_edit.py`.
+- Built OK as `%TEMP%\BongThumbLive_pkg23`. Status: NOT yet deployed / live-verified (waiting for editor lock `editor-free`/`bonglodge-free`). Next: close editor gracefully, back up binaries as next .bakN, copy pkg23 Binaries\Win64, relaunch, screenshot yellow spinner + change colour/style in settings.
