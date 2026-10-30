@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-30 04:52 KST (Asia/Seoul).
+Last update: 2026-10-30 14:50 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -211,3 +211,6 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 
 ## Pending request (do NOT start until the user says so)
 - 2026-10-30 04:51 KST: Baegovda will test after sleeping (clear the disk cache before every test). Wanted next: a loading/buffering animation on a tile from when it is shown until its first frame is ready (idea: small spinner overlay drawn by the plugin; must work for unloaded anims and any tile size, see pushTargetSizes). Start only when the user is back and asks.
+
+## Bot handover (2026-10-30 14:50 KST)
+- Baegovda is handing BongThumbLive to another Grok bot (the one already working on Unreal on this PC) so two bots do not mix up Unreal work. The previous bot stops working on the plugin. State: pkg18 deployed (6441ecc), pending loading-animation request still NOT started, user has not yet manually verified pkg18, tooltip, or other thumbnail sizes. Check running editors by CommandLine before touching any process.
