@@ -51,6 +51,8 @@ class UBongThumbLiveRenderer : public UDefaultSizedThumbnailRenderer
 
 	/** Preview-mesh resolver (cached, never loads synchronously). */
 	static FString GetResolveStats();
+	/** True while the resolver has given up on this animation (no usable preview mesh: the tile keeps the stock icon). */
+	static bool HasGivenUp(const FSoftObjectPath& AnimPath);
 	/** Forget resolved / failed preview meshes (e.g. a skeleton's preview mesh changed). */
 	static void ResetPreviewMeshes();
 	/** Drop every mesh / animation held by the resolver and the preview scenes (assets about to be deleted). */

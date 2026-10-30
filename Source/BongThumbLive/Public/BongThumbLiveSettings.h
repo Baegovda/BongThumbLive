@@ -94,6 +94,10 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "재생", meta = (DisplayName = "카메라 고정 (흔들림 방지)", EditCondition = "bEnabled"))
 	bool bStableFraming = true;
 
+	/** 썸네일이 처음 움직이기 시작할 때까지(첫 그림이 준비될 때까지) 썸네일 가운데에 작은 로딩 표시(빙글빙글 도는 원)를 보여 줍니다. 캐시가 비어 있으면 처음 몇 초가 걸릴 수 있는데, 이 표시로 기다리는 중인지 알 수 있습니다. 첫 그림이 나오면 바로 사라지고, 메모리를 더 쓰지 않습니다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "재생", meta = (DisplayName = "로딩 표시 보이기", EditCondition = "bEnabled"))
+	bool bShowLoadingSpinner = true;
+
 	/** 이펙트를 처음 보여 줄 때 미리 이만큼(초) 재생해 둡니다. 썸네일이 처음에 텅 비어 보이면 늘리세요. 늘리면 처음 표시가 조금 늦어집니다. */
 	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "재생", meta = (DisplayName = "이펙트 미리 재생 시간 (초)", EditCondition = "bEnabled", ClampMin = "0.0", ClampMax = "10.0", UIMin = "0.0", UIMax = "5.0"))
 	float FXWarmupSeconds = 1.0f;

@@ -58,6 +58,9 @@
 #include "UObject/UObjectHash.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/SViewport.h"
+#include "Widgets/SLeafWidget.h"
+#include "Rendering/DrawElements.h"
+#include "Layout/SlateRect.h"
 
 DEFINE_LOG_CATEGORY(LogBongThumbLive);
 
@@ -713,7 +716,8 @@ static void BongCollectAssetViews(const TSharedRef<SWidget>& Widget, TArray<TWea
 }
 
 /** Sizes of the thumbnail viewports (SAssetThumbnail -> SViewport -> FAssetThumbnail) inside one tile widget. */
-static void BongCollectViewportSizes(const TSharedRef<SWidget>& Widget, TArray<FIntPoint, TInlineAllocator<2>>& Out, int32 Depth)
+static void BongCollectViewportSizes(const TSharedRef<SWidget>& Widget, TArray<FIntPoint, TInlineAllocator<2>>& Out, int32 Depth,
+	TArray<TWeakPtr<SWidget>, TInlineAllocator<2>>* OutWidgets = nullptr)
 {
 	if (Depth > 24)
 	{
@@ -729,6 +733,10 @@ static void BongCollectViewportSizes(const TSharedRef<SWidget>& Widget, TArray<F
 			if (Size.X > 0 && Size.Y > 0)
 			{
 				Out.AddUnique(Size);
+				if (OutWidgets)
+				{
+					OutWidgets->Add(Widget.ToWeakPtr());
+				}
 			}
 		}
 		return;
@@ -736,12 +744,13 @@ static void BongCollectViewportSizes(const TSharedRef<SWidget>& Widget, TArray<F
 	FChildren* Children = Widget->GetChildren();
 	for (int32 i = 0; Children && i < Children->Num(); ++i)
 	{
-		BongCollectViewportSizes(Children->GetChildAt(i), Out, Depth + 1);
+		BongCollectViewportSizes(Children->GetChildAt(i), Out, Depth + 1, OutWidgets);
 	}
 }
 
 static void BongCollectTileTags(const TSharedRef<SWidget>& Widget, TSet<FString>& Out, int32 Depth,
-	TMap<FString, TArray<FIntPoint, TInlineAllocator<2>>>* OutSizes = nullptr)
+	TMap<FString, TArray<FIntPoint, TInlineAllocator<2>>>* OutSizes = nullptr,
+	TMap<FString, TArray<FBongTileViewport, TInlineAllocator<2>>>* OutViewports = nullptr, const TSharedPtr<SWidget>& View = nullptr)
 {
 	if (Depth > 64 || !Widget->GetVisibility().IsVisible())
 	{
@@ -756,7 +765,16 @@ static void BongCollectTileTags(const TSharedRef<SWidget>& Widget, TSet<FString>
 			if (OutSizes)
 			{
 				TArray<FIntPoint, TInlineAllocator<2>> Sizes;
-				BongCollectViewportSizes(Widget, Sizes, 0);
+				TArray<TWeakPtr<SWidget>, TInlineAllocator<2>> Viewports;
+				BongCollectViewportSizes(Widget, Sizes, 0, OutViewports ? &Viewports : nullptr);
+				if (OutViewports && Viewports.Num() > 0)
+				{
+					TArray<FBongTileViewport, TInlineAllocator<2>>& DstVP = OutViewports->FindOrAdd(TagString);
+					for (const TWeakPtr<SWidget>& VP : Viewports)
+					{
+						DstVP.Add({ VP, View });
+					}
+				}
 				if (Sizes.Num() > 0)
 				{
 					TArray<FIntPoint, TInlineAllocator<2>>& Dst = OutSizes->FindOrAdd(TagString);
@@ -772,7 +790,7 @@ static void BongCollectTileTags(const TSharedRef<SWidget>& Widget, TSet<FString>
 	FChildren* Children = Widget->GetChildren();
 	for (int32 i = 0; Children && i < Children->Num(); ++i)
 	{
-		BongCollectTileTags(Children->GetChildAt(i), Out, Depth + 1, OutSizes);
+		BongCollectTileTags(Children->GetChildAt(i), Out, Depth + 1, OutSizes, OutViewports, View);
 	}
 }
 
@@ -835,6 +853,7 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 	}
 	TSet<FString> Tags;
 	TMap<FString, TArray<FIntPoint, TInlineAllocator<2>>> TagSizes;
+	TMap<FString, TArray<FBongTileViewport, TInlineAllocator<2>>> TagViewports;
 	for (int32 Index = AssetViews.Num() - 1; Index >= 0; --Index)
 	{
 		TSharedPtr<SWidget> View = AssetViews[Index].Pin();
@@ -845,13 +864,14 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 			AssetViews.RemoveAtSwap(Index);
 			continue;
 		}
-		BongCollectTileTags(View.ToSharedRef(), Tags, 0, &TagSizes);
+		BongCollectTileTags(View.ToSharedRef(), Tags, 0, &TagSizes, &TagViewports, View);
 	}
 	VisibleTileCount = Tags.Num();
 	VisibleTiles.Reset();
 	VisibleTileKeys.Reset();
 	VisibleAnimPaths.Reset();
 	VisibleTileSizes.Reset();
+	VisibleTileViewports.Reset();
 	const bool bAnims = IsKindEnabled(EBongThumbKind::Animation);
 	FBongThumbCache& Cache = FBongThumbCache::Get();
 	for (const FString& Tag : Tags)
@@ -866,6 +886,10 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 				{
 					VisibleTileSizes.Add(Path, *Sizes);
 				}
+				if (const TArray<FBongTileViewport, TInlineAllocator<2>>* Viewports = TagViewports.Find(Tag))
+				{
+					VisibleTileViewports.Add(Path, *Viewports);
+				}
 			}
 		}
 		if (UObject* Obj = ResolveTileTag(Tag))
@@ -877,6 +901,232 @@ void FBongThumbLiveModule::UpdateVisibleTiles(double Now)
 			}
 		}
 	}
+}
+
+/**
+ * Loading spinner overlay: one hit-test-invisible leaf widget in each window's overlay that shows a Content Browser.
+ * It draws a thin rotating arc over every visible anim tile that is still waiting for its first frame. Only a few
+ * Slate line elements per waiting tile: no texture, no frame-cache memory, no scene render.
+ */
+class SBongSpinnerOverlay : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SBongSpinnerOverlay) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs, const TSharedRef<SWindow>& InWindow)
+	{
+		Window = InWindow;
+		SetVisibility(EVisibility::HitTestInvisible);
+		SetCanTick(false);
+		ForceVolatile(true); // repainted every frame (animation), never cached
+	}
+
+	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D::ZeroVector; }
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	{
+		const FBongThumbLiveModule* Module = FBongThumbLiveModule::GetPtr();
+		const double Now = FPlatformTime::Seconds();
+		if (!Module || Now - Module->GetSpinnerUpdateTime() > 0.5) // stale (ticker paused): draw nothing
+		{
+			return LayerId;
+		}
+		const TSharedPtr<SWindow> Mine = Window.Pin();
+		const float Scale = FMath::Max(AllottedGeometry.Scale, 0.01f);
+		const float Spin = (float)FMath::Fmod(Now * 1.25, 1.0) * UE_TWO_PI; // 1.25 turns per second
+		TArray<FVector2f> Ring;
+		TArray<FVector2f> Arc;
+		for (const FBongSpinnerDraw& D : Module->GetSpinnerDraws())
+		{
+			if (!Mine.IsValid() || D.Window.Pin() != Mine)
+			{
+				continue;
+			}
+			const float W = D.Tile.Right - D.Tile.Left;
+			const float H = D.Tile.Bottom - D.Tile.Top;
+			const FVector2f CenterAbs((D.Tile.Left + D.Tile.Right) * 0.5f, (D.Tile.Top + D.Tile.Bottom) * 0.5f);
+			const FVector2f C = FVector2f(AllottedGeometry.AbsoluteToLocal(CenterAbs));
+			// Radius follows the tile size (any thumbnail size): ~11 % of the shorter side, 6-18 px on screen.
+			const float R = FMath::Clamp(FMath::Min(W, H) * 0.11f, 6.0f, 18.0f) / Scale;
+			const float Thick = FMath::Max(1.5f, R * 0.2f * Scale);
+			const float Fade = FMath::Clamp((float)((D.Age - FBongThumbLiveModule::SpinnerDelaySeconds) / 0.25), 0.0f, 1.0f);
+			Ring.Reset();
+			for (int32 i = 0; i <= 32; ++i)
+			{
+				const float A = (float)i / 32.0f * UE_TWO_PI;
+				Ring.Add(C + FVector2f(FMath::Cos(A), FMath::Sin(A)) * R);
+			}
+			Arc.Reset();
+			for (int32 i = 0; i <= 12; ++i)
+			{
+				const float A = Spin + (float)i / 12.0f * UE_TWO_PI * 0.3f; // 108 degree arc
+				Arc.Add(C + FVector2f(FMath::Cos(A), FMath::Sin(A)) * R);
+			}
+			OutDrawElements.PushClip(FSlateClippingZone(D.Clip)); // tiles half scrolled out stay inside the asset view
+			const FPaintGeometry Geo = AllottedGeometry.ToPaintGeometry();
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId, Geo, Ring, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, 0.35f * Fade), true, Thick + 1.5f);
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, Geo, Ring, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.12f * Fade), true, Thick);
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Arc, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.75f * Fade), true, Thick);
+			OutDrawElements.PopClip();
+		}
+		return LayerId + 3;
+	}
+
+private:
+	TWeakPtr<SWindow> Window;
+};
+
+static TSharedPtr<SWindow> BongFindParentWindow(const TSharedPtr<SWidget>& Widget)
+{
+	TSharedPtr<SWidget> Current = Widget;
+	for (int32 Guard = 0; Current.IsValid() && Guard < 512; ++Guard)
+	{
+		if (Current->Advanced_IsWindow())
+		{
+			return StaticCastSharedPtr<SWindow>(Current);
+		}
+		Current = Current->GetParentWidget();
+	}
+	return nullptr;
+}
+
+void FBongThumbLiveModule::UpdateSpinners(double Now)
+{
+	SpinnerDraws.Reset();
+	SpinnerUpdateTime = FPlatformTime::Seconds();
+	SpinnerTiles = 0;
+	const UBongThumbLiveSettings* S = GetDefault<UBongThumbLiveSettings>();
+	const bool bOn = S->bEnabled && S->bShowLoadingSpinner && S->bUseFrameCache && IsKindEnabled(EBongThumbKind::Animation) && FSlateApplication::IsInitialized();
+	TSet<FSoftObjectPath> Waiting;
+	if (bOn)
+	{
+		FBongThumbCache& Cache = FBongThumbCache::Get();
+		for (const FSoftObjectPath& Path : VisibleAnimPaths)
+		{
+			// Only tiles the plugin is actually going to animate (Mode), else e.g. hover mode would spin forever.
+			const bool bActive = S->Mode == EBongThumbLiveMode::VisibleInBrowser
+				|| (S->Mode == EBongThumbLiveMode::Selected && SelectedAssets.Contains(Path)) || Path == HoveredPath;
+			if (!bActive)
+			{
+				continue;
+			}
+			const FBongCacheEntry* Entry = Cache.Find(Path);
+			if (Entry && Entry->NumValid > 0)
+			{
+				continue; // first frame is there: gone immediately
+			}
+			if (UBongThumbLiveRenderer::HasGivenUp(Path))
+			{
+				continue; // no usable preview mesh: the stock icon stays, nothing to wait for
+			}
+			const TArray<FBongTileViewport, TInlineAllocator<2>>* Viewports = VisibleTileViewports.Find(Path);
+			if (!Viewports)
+			{
+				continue;
+			}
+			const double Since = SpinnerSince.FindOrAdd(Path, Now);
+			Waiting.Add(Path);
+			const double Age = Now - Since;
+			if (Age < SpinnerDelaySeconds)
+			{
+				continue;
+			}
+			if (Age > SpinnerMaxSeconds)
+			{
+				if (SpinnerCounted.Remove(Path) > 0)
+				{
+					++SpinnerTimedOut; // counted once, when it stops spinning
+				}
+				continue;
+			}
+			bool bDrew = false;
+			for (const FBongTileViewport& Tile : *Viewports)
+			{
+				const TSharedPtr<SWidget> Viewport = Tile.Viewport.Pin();
+				const TSharedPtr<SWidget> View = Tile.View.Pin();
+				if (!Viewport.IsValid() || !View.IsValid())
+				{
+					continue;
+				}
+				const FSlateRect TileRect = Viewport->GetPaintSpaceGeometry().GetLayoutBoundingRect();
+				const FSlateRect ClipRect = View->GetPaintSpaceGeometry().GetLayoutBoundingRect();
+				if (TileRect.Right - TileRect.Left < 8.0f || TileRect.Bottom - TileRect.Top < 8.0f || !FSlateRect::DoRectanglesIntersect(TileRect, ClipRect))
+				{
+					continue;
+				}
+				const TSharedPtr<SWindow> Window = BongFindParentWindow(Viewport);
+				if (!Window.IsValid())
+				{
+					continue;
+				}
+				bool bHasOverlay = false;
+				for (const TPair<TWeakPtr<SWindow>, TSharedPtr<SWidget>>& Pair : SpinnerOverlays)
+				{
+					bHasOverlay |= Pair.Key.Pin() == Window;
+				}
+				if (!bHasOverlay)
+				{
+					const TSharedRef<SBongSpinnerOverlay> Overlay = SNew(SBongSpinnerOverlay, Window.ToSharedRef());
+					Window->AddOverlaySlot()[Overlay];
+					SpinnerOverlays.Emplace(Window, Overlay);
+				}
+				FBongSpinnerDraw& Draw = SpinnerDraws.AddDefaulted_GetRef();
+				Draw.Tile = TileRect;
+				Draw.Clip = ClipRect;
+				Draw.Age = Age;
+				Draw.Window = Window;
+				bDrew = true;
+			}
+			if (bDrew)
+			{
+				++SpinnerTiles;
+				if (!SpinnerCounted.Contains(Path))
+				{
+					SpinnerCounted.Add(Path);
+					++SpinnerShownTotal;
+				}
+			}
+		}
+	}
+	for (auto It = SpinnerSince.CreateIterator(); It; ++It)
+	{
+		if (!Waiting.Contains(It.Key()))
+		{
+			It.RemoveCurrent();
+		}
+	}
+	for (auto It = SpinnerCounted.CreateIterator(); It; ++It)
+	{
+		if (!Waiting.Contains(*It))
+		{
+			It.RemoveCurrent();
+		}
+	}
+	for (int32 i = SpinnerOverlays.Num() - 1; i >= 0; --i)
+	{
+		if (!SpinnerOverlays[i].Key.IsValid())
+		{
+			SpinnerOverlays.RemoveAtSwap(i); // window closed (its overlay died with it)
+		}
+	}
+}
+
+void FBongThumbLiveModule::RemoveSpinnerOverlays()
+{
+	for (const TPair<TWeakPtr<SWindow>, TSharedPtr<SWidget>>& Pair : SpinnerOverlays)
+	{
+		if (const TSharedPtr<SWindow> Window = Pair.Key.Pin())
+		{
+			if (Pair.Value.IsValid())
+			{
+				Window->RemoveOverlaySlot(Pair.Value.ToSharedRef());
+			}
+		}
+	}
+	SpinnerOverlays.Reset();
+	SpinnerDraws.Reset();
 }
 
 void FBongThumbLiveModule::UpdateHover(double Now)
@@ -1054,6 +1304,8 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 				LiveState, AssetViews.Num(), VisibleAnimPaths.Num(), TilesAnnounced, AnnounceNeeded.Num(), AnnounceLatencyCount, AnnounceLatencyCount ? AnnounceLatencySum / AnnounceLatencyCount : 0.0, AnnounceLatencyMax, VisibleSince.Num(), GetFrameBudgetMs(), GBongAvgDrawMs, GetRenderMsThisFrame(), *(UBongThumbLiveRenderer::GetResolveStats() + TEXT(" | ") + GetRenderGovernorStats()));
 			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: memory: editor %.1f GB (limit %.1f GB), free %.1f GB (minimum %d GB), pressure=%d (events %d), pendingAnimLoads=%d"),
 				LastUsedGB, LastCapGB, LastFreeGB, S->MinFreeMemoryGB, bMemoryPressure ? 1 : 0, PressureEvents, PendingAnimPaths.Num());
+			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: spinner: enabled=%d spinnerTiles=%d spinnerDraws=%d spinnerWaiting=%d spinnerShownTotal=%lld spinnerTimedOut=%lld overlays=%d"),
+				S->bShowLoadingSpinner ? 1 : 0, SpinnerTiles, SpinnerDraws.Num(), SpinnerSince.Num(), SpinnerShownTotal, SpinnerTimedOut, SpinnerOverlays.Num());
 		}),
 		ECVF_Default));
 
@@ -1239,6 +1491,7 @@ void FBongThumbLiveModule::ShutdownModule()
 		UToolMenus::UnRegisterStartupCallback(this);
 		UToolMenus::UnregisterOwner(this);
 	}
+	RemoveSpinnerOverlays();
 	UBongThumbLiveRenderer::ShutdownCache(); // waits for pending disk writes and saves the cache index
 
 	if (TickerHandle.IsValid())
@@ -1368,6 +1621,7 @@ bool FBongThumbLiveModule::Tick(float DeltaTime)
 	UpdateHover(Now);
 	UpdateVisibleTiles(Now);
 	TickCache(Now, false);
+	UpdateSpinners(Now);
 	auto RequestHovered = [&]()
 	{
 		UObject* Hovered = HoveredAsset.Get();

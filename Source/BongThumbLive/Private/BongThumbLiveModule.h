@@ -5,8 +5,26 @@
 #include "Containers/Ticker.h"
 #include "UObject/ObjectKey.h"
 #include "UObject/SoftObjectPath.h"
+#include "Layout/SlateRect.h"
 
 class SWidget;
+class SWindow;
+
+/** One thumbnail viewport of a visible tile, and the asset view it scrolls in (clip rect for the loading spinner). */
+struct FBongTileViewport
+{
+	TWeakPtr<SWidget> Viewport;
+	TWeakPtr<SWidget> View;
+};
+
+/** A loading spinner to draw this frame (absolute Slate coordinates). */
+struct FBongSpinnerDraw
+{
+	FSlateRect Tile;
+	FSlateRect Clip;
+	double Age = 0.0; // seconds the tile has been waiting for its first frame
+	TWeakPtr<SWindow> Window;
+};
 
 class UAnimSequenceBase;
 struct FAssetData;
@@ -90,6 +108,15 @@ private:
 	/** Find the Content Browser item under the mouse cursor (asset tiles carry their virtual path as FTagMetaData). */
 	void UpdateHover(double Now);
 	void UpdateVisibleTiles(double Now);
+public:
+	/** Loading spinner (drawn by SBongSpinnerOverlay in the window overlay, see UpdateSpinners). */
+	const TArray<FBongSpinnerDraw>& GetSpinnerDraws() const { return SpinnerDraws; }
+	double GetSpinnerUpdateTime() const { return SpinnerUpdateTime; }
+	static constexpr double SpinnerDelaySeconds = 0.3;  // no flicker for tiles whose cached frames arrive at once
+	static constexpr double SpinnerMaxSeconds = 90.0;   // safety net: stop spinning for tiles that never get frames
+private:
+	void UpdateSpinners(double Now);
+	void RemoveSpinnerOverlays();
 	UObject* ResolveTileTag(const FString& TagString);
 	/** Content Browser tile tag (virtual path) -> asset path (no load). */
 	FSoftObjectPath TagToPath(const FString& TagString);
@@ -204,6 +231,16 @@ private:
 	bool bAnnouncing = false;
 	int64 TilesAnnounced = 0;
 	TMap<FSoftObjectPath, double> VisibleSince; // newly visible anim tile -> time it appeared (latency stats)
+	/** Thumbnail viewport widgets of each visible anim tile (loading spinner position). */
+	TMap<FSoftObjectPath, TArray<FBongTileViewport, TInlineAllocator<2>>> VisibleTileViewports;
+	TMap<FSoftObjectPath, double> SpinnerSince; // tile waiting for its first frame -> since when
+	TSet<FSoftObjectPath> SpinnerCounted;
+	TArray<FBongSpinnerDraw> SpinnerDraws;
+	TArray<TPair<TWeakPtr<SWindow>, TSharedPtr<SWidget>>> SpinnerOverlays;
+	double SpinnerUpdateTime = 0.0;
+	int32 SpinnerTiles = 0;
+	int64 SpinnerShownTotal = 0;
+	int64 SpinnerTimedOut = 0;
 	int64 AnnounceLatencyCount = 0;
 	double AnnounceLatencySum = 0.0;
 	double AnnounceLatencyMax = 0.0;

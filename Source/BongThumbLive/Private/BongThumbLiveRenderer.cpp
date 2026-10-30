@@ -117,6 +117,7 @@ static int64 GBongResolveFast = 0;
 static int64 GBongResolveSlow = 0;
 static int64 GBongResolveAsyncLoads = 0;
 static int64 GBongResolveGaveUp = 0;
+static TSet<FSoftObjectPath> GBongGaveUpAnims; // animations whose slot gave up (loading spinner skips them)
 
 static FSoftObjectPath BongReadPreviewMeshPath(const UObject* Obj)
 {
@@ -353,6 +354,7 @@ static USkeletalMesh* BongResolvePreviewMesh(UAnimSequenceBase* Anim, bool& bOut
 				{
 					Slot.bGaveUp = true;
 					++GBongResolveGaveUp;
+					GBongGaveUpAnims.Add(FSoftObjectPath(Anim));
 					UE_LOG(LogBongThumbLive, Log, TEXT("BongThumbLive: no usable preview mesh for %s (skeleton %s)%s - showing the stock thumbnail; checked again every 30 s and when assets change."),
 						*Anim->GetPathName(), Skeleton ? *Skeleton->GetPathName() : TEXT("none"), Reasons.IsEmpty() ? *(TEXT(" [no compatible skeletal mesh found]") + BongDescribeNearbyMeshes(Anim, Skeleton)) : *Reasons);
 				}
@@ -365,6 +367,7 @@ static USkeletalMesh* BongResolvePreviewMesh(UAnimSequenceBase* Anim, bool& bOut
 		{
 			--GBongResolveGaveUp;
 			Slot.bGaveUp = false;
+			GBongGaveUpAnims.Remove(FSoftObjectPath(Anim));
 		}
 		Slot.Mesh = Mesh;
 		Slot.Failures = 0;
@@ -382,6 +385,7 @@ static USkeletalMesh* BongResolvePreviewMesh(UAnimSequenceBase* Anim, bool& bOut
 static void BongResetMeshSlots()
 {
 	GBongMeshSlots.Reset();
+	GBongGaveUpAnims.Reset();
 	GBongCompatibleMeshPaths.Reset();
 	GBongMeshLoadsFailed.Reset();
 }
@@ -633,6 +637,11 @@ FString UBongThumbLiveRenderer::GetResolveStats()
 	return FString::Printf(TEXT("meshResolve: slots=%d fast=%lld slow=%lld asyncLoads=%lld inFlight=%d gaveUp=%d (total %lld) heldMeshes=%d (cap %d) ownedMeshRoots=%d ownedAnimRoots=%d"),
 		GBongMeshSlots.Num(), GBongResolveFast, GBongResolveSlow, GBongResolveAsyncLoads, GBongMeshLoadsInFlight.Num(), GaveUp, GBongResolveGaveUp,
 		GBongMeshHolder ? GBongMeshHolder->Meshes.Num() : 0, GetDefault<UBongThumbLiveSettings>()->MaxHeldPreviewMeshes, BongOwned::Num(true), BongOwned::Num(false));
+}
+
+bool UBongThumbLiveRenderer::HasGivenUp(const FSoftObjectPath& AnimPath)
+{
+	return GBongGaveUpAnims.Contains(AnimPath);
 }
 
 void UBongThumbLiveRenderer::ResetPreviewMeshes()

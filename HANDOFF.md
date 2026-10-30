@@ -1,6 +1,6 @@
 # BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-30 14:50 KST (Asia/Seoul).
+Last update: 2026-10-30 15:00 KST (Asia/Seoul).
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -104,6 +104,7 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 9. **Verify disk-cache invalidation after edit/re-save, and the tooltip on screen** (todo).
 10. **Folder click: capture must start immediately.** Measure folder-click → first live tile before and after, and report which part of the delay is engine-side (todo).
 11. Always keep the memory caps. Settings stay Korean and beginner-friendly.
+12. **Loading spinner on a tile until its first frame** (code done + compiled pkg19, deploy/test pending; see section below).
 
 ## Done (this session, 2026-10-29 evening)
 - Analysed run4 (fresh generation) and run5 (all cached) logs.
@@ -209,8 +210,19 @@ All via `btl_run.ps1`, same config (Taunts01 gen 60 s, Minigun gen 60 s, disk re
 - Backups: `BongThumbLiveCache.cpp.bak5`, `BongThumbLiveModule.cpp.bak8`, `BongThumbLiveRenderer.cpp.bak7`, `Public/BongThumbLiveRenderer.h.bak3`, `BongThumbLiveModule.h.bak6`, `BongThumbLiveCache.h.bak3` (the two .h backups were copied from the clone = pkg17 content); binaries `.bak15` = pkg17.
 - Note: I closed the user's own UE_VFX_57 editor (CloseMainWindow, closed cleanly) to run tests.
 
-## Pending request (do NOT start until the user says so)
+## Pending request (STARTED 2026-10-30 on user order, see Loading spinner section)
 - 2026-10-30 04:51 KST: Baegovda will test after sleeping (clear the disk cache before every test). Wanted next: a loading/buffering animation on a tile from when it is shown until its first frame is ready (idea: small spinner overlay drawn by the plugin; must work for unloaded anims and any tile size, see pushTargetSizes). Start only when the user is back and asks.
 
 ## Bot handover (2026-10-30 14:50 KST)
 - Baegovda is handing BongThumbLive to another Grok bot (the one already working on Unreal on this PC) so two bots do not mix up Unreal work. The previous bot stops working on the plugin. State: pkg18 deployed (6441ecc), pending loading-animation request still NOT started, user has not yet manually verified pkg18, tooltip, or other thumbnail sizes. Check running editors by CommandLine before touching any process.
+
+## Loading spinner until first frame (CODE DONE + compiled 2026-10-30 14:57 KST, NOT deployed / NOT tested)
+- User (pt136u, 2026-10-30): "인수 다받으면 새기능 착수해" = start the pending loading-animation feature now.
+- **Design:** one hit-test-invisible `SBongSpinnerOverlay` (SLeafWidget, volatile) added via `SWindow::AddOverlaySlot` to each window that shows a Content Browser (main or floating). Each tick `UpdateSpinners` (Module.cpp, after TickCache) builds a list of draws from the tile's own SViewport paint geometry (any tile size: radius = 11 % of the shorter side, 6-18 px), clipped to the asset view rect. Drawn = 3 antialiased Slate line elements (dark ring, faint white ring, rotating 108° white arc, 1.25 turns/s). No textures, no frame-cache memory, no scene renders.
+- **Shown when:** anim tile visible + plugin will animate it (Mode: Visible / Selected+selected / hovered) + cache entry has 0 valid frames + resolver has NOT given up (`UBongThumbLiveRenderer::HasGivenUp`, new set `GBongGaveUpAnims`) + waiting >= 0.3 s (no flicker for cached tiles; fades in 0.25 s). Gone the same tick NumValid > 0 (same moment the tile is announced). Safety cap 90 s (`spinnerTimedOut`). Overlay draws nothing if UpdateSpinners did not run for 0.5 s.
+- **Setting:** `bShowLoadingSpinner` (재생 / "로딩 표시 보이기", default on, Korean tooltip).
+- **Status line:** `spinner: enabled spinnerTiles spinnerDraws spinnerWaiting spinnerShownTotal spinnerTimedOut overlays`.
+- **Backups (made before editing):** `Public/BongThumbLiveSettings.h.bak3`, `Public/BongThumbLiveRenderer.h.bak4`, `Private/BongThumbLiveRenderer.cpp.bak8`, `Private/BongThumbLiveModule.h.bak7`, `Private/BongThumbLiveModule.cpp.bak9`.
+- **Build:** pkg19 `%TEMP%\BongThumbLive_pkg19` built with RunUAT BuildPlugin while the editor ran (BuildPlugin builds a HostProject copy; live plugin binaries untouched): `BUILD SUCCESSFUL`, 0 errors. Log `%TEMP%\btl_pkg19_build.log`.
+- **Not done (needs the UE_VFX_57 editor closed; PID 33536 was in use by another worker for level work):** back up plugin `Binaries\Win64` dll/pdb/modules as `.bak16` (= pkg18), copy pkg19 `Binaries\Win64\*` in, relaunch editor, `btl_cold_run.ps1` (cold cache) on /Game/Props + /Game/SM2_Work, screenshots at 0.3/1/3 s after scroll at 160 and 256 tile sizes, check spinner on waiting tiles, none on hologram_planet__anim_bak1..5 after give-up, Status spinner line, toggle off works.
+- Known limits (unverified): before the resolver gives up (~14 s: 2/4/8 s retries) meshless anims spin; a tile whose pool shows a saved package thumbnail still gets the spinner until the first live frame (intended: "until first frame").
