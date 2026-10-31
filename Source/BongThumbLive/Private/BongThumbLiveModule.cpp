@@ -1011,13 +1011,24 @@ public:
 			}
 			case EBongSpinnerStyle::Dots:
 			{
+				// Real dots: 8 filled round discs on the ring, the whole ring rotates and the dots shrink/fade
+				// behind the head, so it reads as a classic rotating dots spinner (not short bars).
+				const float DotR = FMath::Max(1.5f / Scale, R * 0.22f); // local units
 				for (int32 k = 0; k < 8; ++k)
 				{
-					const float A = (float)k / 8.0f * UE_TWO_PI;
-					const float Lag = FMath::Fmod(Phase - (float)k / 8.0f + 1.0f, 1.0f); // head dot brightest
+					const float T = (float)k / 8.0f;           // 0 = head
+					const float A = Spin - T * UE_TWO_PI;       // trail behind the head, whole ring turns
 					const FVector2f P0 = C + FVector2f(FMath::Cos(A), FMath::Sin(A)) * R;
-					TArray<FVector2f> Dot; Dot.Add(P0 - FVector2f(Thick * 0.5f / Scale, 0.f)); Dot.Add(P0 + FVector2f(Thick * 0.5f / Scale, 0.f));
-					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Dot, ESlateDrawEffect::None, FLinearColor(Col.R, Col.G, Col.B, (0.15f + 0.8f * (1.0f - Lag)) * Fade), true, Thick * 1.6f);
+					const float Rk = DotR * (1.0f - 0.55f * T);
+					// Filled disc: a closed circle of radius Rk/2 stroked with width Rk (in pixels).
+					TArray<FVector2f> Disc;
+					for (int32 i = 0; i <= 16; ++i)
+					{
+						const float B = (float)i / 16.0f * UE_TWO_PI;
+						Disc.Add(P0 + FVector2f(FMath::Cos(B), FMath::Sin(B)) * (Rk * 0.5f));
+					}
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, Geo, Disc, ESlateDrawEffect::None,
+						FLinearColor(Col.R, Col.G, Col.B, (0.25f + 0.7f * (1.0f - T)) * Fade), true, FMath::Max(1.0f, Rk * Scale));
 				}
 				break;
 			}
