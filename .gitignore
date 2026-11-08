@@ -5,3 +5,4 @@ Intermediate/
 *.zip
 Saved/
 .vs/
+node_modules/

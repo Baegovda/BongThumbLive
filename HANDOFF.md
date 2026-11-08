@@ -1,6 +1,21 @@
-# BongThumbLive – HANDOFF (keep this file current)
+﻿# BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-10-30 15:00 KST (Asia/Seoul).
+Last update: 2026-11-08 KST (Asia/Seoul).
+
+## Current work: full audit fixes (2026-11-08)
+
+- Completed user goal: all nine audit fixes are implemented, tested, and deployed to the existing UE_VFX_57 plugin with backups. No new release or tag was created.
+- Windows inspection rule: do not use Computer Use, mouse/keyboard driving, focus, or window repositioning. Read processes and GetWindowRect; use CopyFromScreen/PrintWindow only for screenshots. Domain-level automation in the disposable UE project is used for regression tests.
+- Working checkout: `C:/Users/Revaptor_FX/Documents/Codex/2026-11-08/https-github-com-baegovda-bongthumblive-https/work/BongThumbLive`, branch `fix/full-audit`, based on `ce194349ff5b8dda392675f0c1fd69247df43f8b`. Q: is a temporary subst of this chat's work directory for short UE build paths.
+- Nine fixes implemented: common guarded load queue; PID/project-bound watchdog; mesh/skeleton dependency invalidation; job generations/file revisions; byte leases covering worker/GPU lifetimes; legacy config import; sub-1-FPS clip sampling; bounded header parsing; spinner table/tile clipping. Source files have original `.bak1` backups (ignored by git).
+- Final source/package build succeeded: UE 5.7 Win64, `Q:/fixed-final`, log `Q:/fixed-final-build.log`. Cache key version 2 invalidates pictures sampled by the previous sub-1-FPS timing rule. Cache byte leases include buffers/retained atlases; the Korean setting now distinguishes this from engine/driver and preview-asset memory.
+- Verified: legacy False/7 FPS/2x settings now survive migration; watchdog accepted the exact editor and rejected four mismatched identities without stopping any editor. Report `Q:/watchdog-tests.json`.
+- Verified on the final deployed binary: seven UE automation tests passed (`Q:/automation-final/index.json`, zero failures/warnings/not-run). Spinner test checked 230 real tile clips, including 23 partial tiles. An earlier fixture had no partial tiles, so it was expanded to 256 unsaved animation duplicates rather than weakening the assertion.
+- Cold cache regression (pkg6): 113 cache files before skeleton save, 0 immediately after, 113 regenerated 15 seconds later; all dependency headers match the new skeleton. Maximum sampled frame-cache account 27.5 MB / 128 MB; dump has 24 unique frames. No runtime errors. Reports `Q:/fixed-runtime2-results.json`, `Q:/fixed-runtime-validation.json`, log `Q:/fixed-runtime2.log`. UE GetStatData signatures use whole-second UTC ticks; do not compare them to fractional file times.
+- Warm-cache test of the final binary: all 113 files reused unchanged, 113 disk-loaded entries, no errors. Some assets (36) were still loaded by the editor/pool recovery path; do not claim a universal zero-asset-load startup. Maximum sampled cache account 27.6 MB / 128 MB, async asset requests <=4. Evidence `Q:/warm-cache-validation.json`.
+- Deployed 16 changed/new source/binary files into `K:/Unreal Projects/UE_VFX_57/Plugins/BongThumbLive`, each previous file backed up using its next free `.bakN`. Full paths/hashes are in this chat's `outputs/deployment-backups.json`. Live source was checked against the reviewed base before applying; only line-ending differences existed. No user assets were changed.
+- Real project smoke passed: new DLL loaded from the real plugin path, its own frame cache cleared, five Status samples, normal exit, no errors/ensures. A first smoke helper used an unavailable Python Paths method and was corrected; the successful final run is `Q:/live-smoke2.log` and `Q:/live-smoke-validation.json`.
+- Delivery: source committed and pushed as a normal fast-forward in the final delivery step (see `git log` for the commit), no new release. Installable plugin ZIP, source ZIP, patch and detailed verification report are in this chat's `outputs/`. Original source/binary `.bakN` files remain on the PC for rollback. Test editors were closed at the end. Q: is removed after packaging; logs remain at the real chat `work/` path.
 
 ## What this is
 BongThumbLive is a UE 5.7 **editor-only** plugin (Win64) that makes Content Browser thumbnails move: animation sequences, montages and composites loop on their preview mesh, materials animate, and Niagara and Cascade effects simulate. Animation frames are cached in GPU atlases and on disk.
@@ -16,7 +31,7 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
    - `K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive\BongThumbLive.uplugin` (plugin)
    - `C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe` (engine)
    The old machine id was `d3fb99ad-25ca-45c1-81af-41e5ca09104a` (valid only on the original bot account). Shell on the PC is PowerShell (pwsh).
-2. **GitHub access.** The repo is private (owner Baegovda). The PC already has `gh` 2.95 + git 2.47 logged in and able to push: verify with `gh auth status` on the PC. Clone if missing: `gh repo clone Baegovda/BongThumbLive C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo`. If `gh` is logged out, ask Baegovda to run `gh auth login` on the PC (do not handle tokens yourself). A GitHub connector on your side is optional (read-only convenience).
+2. **GitHub access.** The repo is public as of 2026-11-08 (owner Baegovda). The PC already has `gh` 2.95 + git 2.47 logged in and able to push: verify with `gh auth status` on the PC. Clone if missing: `gh repo clone Baegovda/BongThumbLive C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo`. If `gh` is logged out, ask Baegovda to run `gh auth login` on the PC (do not handle tokens yourself). A GitHub connector on your side is optional (read-only convenience).
 3. **Required tools on the PC** (all already installed): UE 5.7 at `C:\Program Files\Epic Games\UE_5.7`; RunUAT `C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\RunUAT.bat` (needs Visual Studio 2022 C++ toolchain, present); git, gh; Python 3.10 (`C:\Program Files\Python310\python.exe`) for log parsing.
 4. **Test tools live in the repo** under `Tools/` (bench script, log parser, watchdog). Copy them to `C:\Users\Revaptor_FX\AppData\Local\Temp\` before running (the bench script reads its config from there).
    - Temp-only helpers that used to exist only in `%TEMP%` are now in `Tools/` too (2026-10-30 audit): `btl_verify3.py` (timed Status/screenshot/settings run, reads `Temp\btl_run.txt`), `btl_diag2.py` (obj list / memreport / GC diag run), `btl_rep.ps1` (exact-string replace helper, keeps BOM), `btl_sm2_diag.py` (read-only stuck-tile diag in `/Game/SM2_Work`), `btl_skel_fix.py` (**saves** the two hologram_planet skeletons' compatible list — asset write, only when asked, back up first).
@@ -25,7 +40,7 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 5. Then run the Resume checklist below.
 
 ## Access (for a new bot that only has the repo URL)
-- The repo is **private**: https://github.com/Baegovda/BongThumbLive. To read it from the box, use the GitHub connector/tools (cursor-github), or `gh` on the user's PC. The PC's `gh` and git are already authenticated as the user (Revaptor_FX / revaptor@gmail.com) and can push.
+- The repo is **public** as of 2026-11-08: https://github.com/Baegovda/BongThumbLive. To read it from the box, use the GitHub connector/tools (cursor-github), or `gh` on the user's PC. The PC's `gh` and git are already authenticated as the user (Revaptor_FX / revaptor@gmail.com) and can push.
 - All real work happens on the user's Windows PC. Use Shell targeted at the PC (PowerShell; see Fresh environment setup to find/register it), and use CopyToBox / CopyFromBox to move files.
 - If the clone at `C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo` is missing, run `gh repo clone Baegovda/BongThumbLive <dir>` on the PC.
 
@@ -40,7 +55,7 @@ Do NOT rely on any agent-side files (`/workspace/...`, memory). Everything neede
 ## Paths
 - User PC: **Revaptor-FX** (original-account machine id `d3fb99ad-25ca-45c1-81af-41e5ca09104a`; Windows, 128 GB RAM, 24C/32T). Run commands with Shell machineId (PowerShell).
 - Plugin (live, used by editor): `K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive`. This folder is NOT a git repo.
-- Git clone used for commits: `C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo` (origin https://github.com/Baegovda/BongThumbLive.git, **private**). Workflow: edit the plugin source, then copy the changed files into the clone, then commit and push (fast-forward only).
+- Git clone used for commits: `C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_repo` (origin https://github.com/Baegovda/BongThumbLive.git, **public**). Workflow: edit the plugin source, then copy the changed files into the clone, then commit and push (fast-forward only).
 - Project: `K:\Unreal Projects\UE_VFX_57\UE_VFX_57.uproject`; engine `C:\Program Files\Epic Games\UE_5.7`.
 - Disk cache: `K:\Unreal Projects\UE_VFX_57\Saved\BongThumbLive\Cache`.
 - Full plugin backups: `K:\Unreal Projects\UE_VFX_57\PluginBackups\BongThumbLive.bak1..bak7`.

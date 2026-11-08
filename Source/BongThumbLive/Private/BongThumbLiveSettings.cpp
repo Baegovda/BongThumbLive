@@ -19,6 +19,9 @@ void UBongThumbLiveSettings::MigrateLegacyConfig()
 	const FString& Ini = GEditorPerProjectIni;
 	const FString NewSection = GetClass()->GetPathName(); // /Script/BongThumbLive.BongThumbLiveSettings
 	const TCHAR* OldSection = TEXT("/Script/AnimThumbLive.AnimThumbLiveSettings");
+	// Capture this before SaveConfig creates the new section during the schema upgrade.
+	const bool bImportLegacy = !GConfig->DoesSectionExist(*NewSection, Ini) && GConfig->DoesSectionExist(OldSection, Ini);
+	bool bUpgraded = false;
 	// v2: memory budget default raised 256 -> 1024 MB (GPU atlas cache), held-mesh cap added.
 	if (SettingsVersion < 2)
 	{
@@ -27,10 +30,11 @@ void UBongThumbLiveSettings::MigrateLegacyConfig()
 			CacheMemoryMB = 1024;
 		}
 		SettingsVersion = 2;
-		SaveConfig();
+		bUpgraded = true;
 	}
-	if (GConfig->DoesSectionExist(*NewSection, Ini) || !GConfig->DoesSectionExist(OldSection, Ini))
+	if (!bImportLegacy)
 	{
+		if (bUpgraded) { SaveConfig(); }
 		return;
 	}
 	bool B = false;

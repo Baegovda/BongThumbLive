@@ -45,3 +45,22 @@ Copy the `BongThumbLive` folder into `<Project>/Plugins/` and restart the editor
 - Win64 / editor only. Tested with D3D11 on UE 5.7.
 - Filling the cache for a large folder costs editor frame time once (a few seconds per screen of new animations). After that, playback is essentially free.
 - The disk cache is safe to delete at any time.
+
+## Audit fixes (2026-11-08, unreleased)
+- Selection, visible auto-load and missing-tile recovery share the memory guard and async batch limit. Plugin-loaded animation roots remain capped at 12; preview meshes remain capped at 6 by default.
+- Saving or editing a preview mesh/skeleton invalidates dependent frames immediately. Package signatures are also rechecked while entries are in memory.
+- Cache jobs carry generation stamps. Clear, rename and removal discard obsolete work; file revisions prevent delayed deletes/index writes from overwriting newer results.
+- The frame-cache budget now includes live atlas references and reserved readback, compression, decoding and upload buffers, including those still held after an entry is evicted. Preview assets and engine/driver overhead are handled separately by the RAM guard.
+- Legacy AnimThumbLive settings migrate before the new section is saved. Clips with an effective cache rate below 1 FPS sample the entire loop. Invalid cache geometry and oversized string/array prefixes are rejected before allocation.
+- Loading overlays clip to the tile table and tile bounds, including partially scrolled rows.
+- The benchmark watchdog requires an exact PID, start time, executable and project. It never selects an arbitrary editor or terminates unrelated crash reporters.
+- The optional MCP helper has a lockfile; use `npm ci` in `Tools/btl_mcp`.
+
+## Regression tests
+Run only in a **disposable UE 5.7 project**, with PythonScriptPlugin and EditorScriptingUtilities enabled and copied animation fixtures (the default runner folder is listed in the script). Create an empty `BTL_DISPOSABLE_TEST_PROJECT` marker in that project directory. The runner creates three rendering fixtures under `/Game/BTLRegression` and 256 unsaved UI tiles; it must not be run in a working art project.
+
+Launch the disposable project with `-d3d11 -unattended -AutoDeclinePackageRecovery -ExecCmds="py <repo>/Tools/Tests/run_editor_regressions.py" -ReportExportPath=<report-dir> -TestExit="Automation Test Queue Empty" -ini:EditorSettings:[/Script/UnrealEd.EditorPerformanceSettings]:bThrottleCPUWhenNotForeground=False`.
+
+The `BongThumbLive.*` automation suite covers sampling, bounded cache parsing, concurrent memory reservations, stale async publication and dependency invalidation, loading guards, Material/Niagara/Cascade rendering, and clipping of real partially visible thumbnail widgets. Read the exported `index.json` failure count; TestExit alone is not a passing result.
+
+`Tools/Tests/test_watchdog.ps1` validates the identity guards against a running disposable editor without terminating it. Supply `-EditorProcessId`, `-ProjectPath`, `-EditorExecutable` and an existing `-OutputDirectory`.

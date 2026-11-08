@@ -231,6 +231,10 @@ static bool BongMeshLoadFailedRecently(FName PackageName)
 
 static void BongStartMeshLoad(const FSoftObjectPath& Path)
 {
+	if (const FBongThumbLiveModule* Module = FBongThumbLiveModule::GetPtr())
+	{
+		if (Module->IsUnderMemoryPressure()) { return; }
+	}
 	const FName PackageName = Path.GetLongPackageFName();
 	if (PackageName.IsNone() || GBongMeshLoadsInFlight.Contains(PackageName) || BongMeshLoadFailedRecently(PackageName))
 	{
@@ -789,7 +793,7 @@ int32 UBongThumbLiveRenderer::FillFrames(UAnimSequenceBase* Anim, FBongCacheEntr
 		{
 			break; // render thread / GPU busy: continue next frame (spread instead of a burst)
 		}
-		const float Time = FMath::Clamp((float)Frame / FMath::Max(Entry.Fps, 1.f), 0.f, FMath::Max(0.f, Entry.Length - UE_KINDA_SMALL_NUMBER));
+		const float Time = Entry.SampleTimeAt(Frame);
 		if (!GBongFillScene->SetAnimation(Anim, Time, bStable))
 		{
 			break; // preview mesh not ready yet (loading / compiling)
@@ -947,7 +951,7 @@ void UBongThumbLiveRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Widt
 			NotifyDrawn();
 			return;
 		}
-		Time = FMath::Clamp((float)FrameIndex / FMath::Max(Entry->Fps, 1.f), 0.f, FMath::Max(0.f, Entry->Length - UE_KINDA_SMALL_NUMBER));
+		Time = Entry->SampleTimeAt(FrameIndex);
 	}
 
 	if (ThumbnailScene == nullptr)

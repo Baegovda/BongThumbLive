@@ -6,14 +6,20 @@ $T = $env:TEMP
 $cfg = Get-Content "$T\btl_bench_cfg.json" -Raw | ConvertFrom-Json
 $cfg.run = $Run
 $cfg | ConvertTo-Json -Depth 5 | Set-Content "$T\btl_bench_cfg.json" -Encoding utf8
-$repo = "$T\BongThumbLive_repo\Tools"
-$wd = Start-Process pwsh -ArgumentList "-NoProfile -File `"$repo\btl_watchdog.ps1`" -Out `"$T\btl_mem_$Run.csv`"" -WindowStyle Hidden -PassThru
+$repo = $PSScriptRoot
 $al = "`"K:\Unreal Projects\UE_VFX_57\UE_VFX_57.uproject`" -AutoDeclinePackageRecovery " +
         "-ini:EditorSettings:[/Script/UnrealEd.EditorPerformanceSettings]:bThrottleCPUWhenNotForeground=False " +
         "-ExecCmds=`"py $T\btl_bench.py`" $Extra"
-$p = Start-Process "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe" -ArgumentList $al -PassThru
-$p.WaitForExit(900000) | Out-Null
-Stop-Process -Id $wd.Id -ErrorAction SilentlyContinue
+$editor = 'C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe'
+$project = 'K:\Unreal Projects\UE_VFX_57\UE_VFX_57.uproject'
+$p = Start-Process $editor -ArgumentList $al -WindowStyle Hidden -PassThru
+$watchArgs = "-NoProfile -File `"$repo\btl_watchdog.ps1`" -ProcessId $($p.Id) -ExpectedStartTimeTicks $($p.StartTime.ToUniversalTime().Ticks) -ProjectPath `"$project`" -EditorExecutable `"$editor`" -Out `"$T\btl_mem_$Run.csv`""
+$wd = Start-Process pwsh -ArgumentList $watchArgs -WindowStyle Hidden -PassThru
+try { $p.WaitForExit(900000) | Out-Null }
+finally {
+  $watcher = Get-Process -Id $wd.Id -ErrorAction SilentlyContinue
+  if ($watcher -and $watcher.StartTime.ToUniversalTime().Ticks -eq $wd.StartTime.ToUniversalTime().Ticks) { Stop-Process -InputObject $watcher }
+}
 "exited=$($p.HasExited) code=$($p.ExitCode) $(Get-Date)"
 Copy-Item "K:\Unreal Projects\UE_VFX_57\Saved\Logs\UE_VFX_57.log" "$T\btl_$Run.log" -Force
 & "C:\Program Files\Python310\python.exe" "$T\btl_bench_parse.py" "$T\btl_$Run.log"

@@ -27,12 +27,15 @@ class FAssetThumbnailPool;
 struct FBongAsyncShared;
 struct FBongDiskLoadResult;
 struct FBongReadbackJob;
+struct FBongMemoryAccount;
+struct FBongMemoryLease;
 
 /** GPU atlas texture (created / used on the render thread; shared with in-flight render commands). */
 struct FBongAtlasGPU
 {
 	FTextureRHIRef Texture;
 	FIntPoint Size = FIntPoint::ZeroValue;
+	TSharedPtr<FBongMemoryLease, ESPMode::ThreadSafe> Memory;
 };
 using FBongAtlasRef = TSharedPtr<FBongAtlasGPU, ESPMode::ThreadSafe>;
 
@@ -62,6 +65,7 @@ struct FBongCacheEntry
 	/** Preview mesh / skeleton package names used to render it (stale check of the disk file). */
 	FName MeshPackage;
 	FName SkeletonPackage;
+	FString Deps; // package signatures captured when the frames were rendered
 	double LastUse = 0.0;
 	double LastKeyCheck = 0.0;
 	double LastIndexTouch = -1.0e9;
@@ -69,6 +73,7 @@ struct FBongCacheEntry
 
 	bool IsComplete() const { return NumFrames > 0 && NumValid >= NumFrames; }
 	int32 FrameIndexAt(float Time) const;
+	float SampleTimeAt(int32 Frame) const;
 	FIntRect CellRect(int32 Frame) const;
 	/** Valid frame closest before Frame (wrapping), or INDEX_NONE. */
 	int32 NearestValid(int32 Frame) const;
@@ -136,12 +141,14 @@ public:
 	void OnAssetRemoved(const FAssetData& Asset);
 	void OnAssetRenamed(const FAssetData& Asset, const FString& OldObjectPath);
 	void OnPackageSaved(FName PackageName);
+	/** Invalidate animation frames and disk entries that depend on an edited mesh/skeleton. */
+	void InvalidatePackage(FName PackageName);
 
 	// --- stats ---
 	FString GetStats() const;
 	/** "N개 파일, X MB / Y MB" (settings page). */
 	FString GetDiskSummary() const;
-	int64 GetMemoryBytes() const { return MemBytes + InFlightCpuBytes; }
+	int64 GetMemoryBytes() const;
 	int32 GetNumPushTiles() const { return PushTiles.Num(); }
 	int32 GetNumComplete() const;
 	/** Debug: write a few frames of the first complete entries (PNG) and log per-frame hashes. */
@@ -159,6 +166,7 @@ public:
 	int64 OverBudget = 0;
 
 private:
+	friend class FBongCacheRegressionTest;
 	FBongThumbCache();
 	~FBongThumbCache();
 	void Startup();
@@ -168,7 +176,8 @@ private:
 	FString GetPackageSig(FName PackageName, double Now);
 	void SetupGeometry(FBongCacheEntry& E, float Length) const;
 	bool Reserve(int64 Bytes, const TSet<FSoftObjectPath>* Keep, double Now);
-	FBongAtlasRef CreateAtlas(int32 W, int32 H, TSharedPtr<TArray<uint8>, ESPMode::ThreadSafe> InitialData);
+	FBongAtlasRef CreateAtlas(int32 W, int32 H, TSharedPtr<TArray<uint8>, ESPMode::ThreadSafe> InitialData,
+		TSharedPtr<FBongMemoryLease, ESPMode::ThreadSafe> UploadMemory = nullptr);
 	void DropEntry(const FSoftObjectPath& Path);
 	void MaybeStartSave(FBongCacheEntry& E);
 	void StartDiskLoad(const FSoftObjectPath& Path, const FString& FileName, const FString& Key);
@@ -181,10 +190,13 @@ private:
 	void WriteIndex(bool bSync);
 	void Push(const FTickParams& Params, const TSet<FSoftObjectPath>& Active);
 	void Fill(const FTickParams& Params);
+	int64 MemoryBudget() const;
+#if WITH_DEV_AUTOMATION_TESTS
+	FString TestCacheDir;
+#endif
 
 	TMap<FSoftObjectPath, TUniquePtr<FBongCacheEntry>> Entries;
 	int64 MemBytes = 0;
-	int64 InFlightCpuBytes = 0;
 	int64 Evictions = 0;
 	int64 PushedFrames = 0;
 	int64 DiskHits = 0;
@@ -255,13 +267,14 @@ private:
 namespace BongOwned
 {
 	/** Call right before starting the load of Root (no-op if it is already in memory: then it is not ours). */
-	void Track(FName Root, const FSoftObjectPath& AssetPath, bool bMesh);
+	void Track(FName Root, const FSoftObjectPath& AssetPath, bool bMesh, bool bAnimation = true);
 	void Touch(FName Root, double Now);
 	struct FInfo
 	{
 		FName Root;
 		FSoftObjectPath AssetPath;
 		bool bMesh = false;
+		bool bAnimation = true;
 		double TrackedAt = 0.0;
 		double LastUse = 0.0;
 	};

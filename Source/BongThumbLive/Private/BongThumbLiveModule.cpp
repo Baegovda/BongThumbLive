@@ -10,10 +10,12 @@
 #include "HAL/PlatformMemory.h"
 #include "RenderingThread.h"
 #include <atomic>
+#include "Misc/AutomationTest.h"
 
 #include "Animation/AnimSequenceBase.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
+#include "Engine/SkeletalMesh.h"
 #include "AssetCompilingManager.h"
 #include "IAssetCompilingManager.h"
 #include "Interfaces/ITargetPlatform.h"
@@ -32,6 +34,9 @@
 #include "Types/ISlateMetaData.h"
 #include "ContentBrowserModule.h"
 #include "ContentBrowserItemPath.h"
+#if WITH_DEV_AUTOMATION_TESTS
+#include "SAssetView.h"
+#endif
 #include "IContentBrowserSingleton.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
@@ -496,9 +501,10 @@ void FBongThumbLiveModule::StartupModule()
 			UBongThumbLiveRenderer::InvalidateCached(Obj);
 			BongForgetAnimReady(Obj); // an edit can trigger a recompression
 		}
-		else if (Obj && Obj->IsA<USkeleton>())
+		else if (Obj && (Obj->IsA<USkeleton>() || Obj->IsA<USkeletalMesh>()))
 		{
-			UBongThumbLiveRenderer::ResetPreviewMeshes(); // preview mesh of a skeleton may have changed
+			UBongThumbLiveRenderer::ResetPreviewMeshes(); // preview mesh or skeleton data may have changed
+			if (FBongThumbCache* Cache = FBongThumbCache::GetPtr()) { Cache->InvalidatePackage(Obj->GetOutermost()->GetFName()); }
 		}
 	});
 	RegisterConsoleCommands();
@@ -622,7 +628,9 @@ void FBongThumbLiveModule::OnPoolThumbnail(const FAssetData& AssetData)
 	{
 		return;
 	}
-	if (VisibleSeen.Contains(AssetData.PackageName) || !IsKindEnabled(GetKind(AssetData)))
+	if (!IsKindEnabled(GetKind(AssetData)) || InFlightPackages.Contains(AssetData.PackageName)
+		|| VisiblePending.Contains(AssetData.PackageName) || PendingPackages.Contains(AssetData.PackageName)
+		|| ExplicitPending.Contains(AssetData.GetSoftObjectPath()))
 	{
 		return;
 	}
@@ -1068,6 +1076,23 @@ static TSharedPtr<SWindow> BongFindParentWindow(const TSharedPtr<SWidget>& Widge
 	return nullptr;
 }
 
+static FSlateRect BongSpinnerClip(const TSharedPtr<SWidget>& Viewport, const TSharedPtr<SWidget>& View)
+{
+	FSlateRect Clip = View->GetPaintSpaceGeometry().GetLayoutBoundingRect();
+	for (TSharedPtr<SWidget> W = Viewport; W.IsValid() && W != View; W = W->GetParentWidget())
+	{
+		const FName Type = W->GetType();
+		const EWidgetClipping Policy = W->GetClipping();
+		if (Type == TEXT("SAssetTileView") || Type == TEXT("SAssetListView") || Type == TEXT("SAssetColumnView")
+			|| Policy == EWidgetClipping::ClipToBounds || Policy == EWidgetClipping::ClipToBoundsAlways
+			|| Policy == EWidgetClipping::ClipToBoundsWithoutIntersecting)
+		{
+			Clip = Clip.IntersectionWith(W->GetPaintSpaceGeometry().GetLayoutBoundingRect());
+		}
+	}
+	return Clip.IntersectionWith(Viewport->GetPaintSpaceGeometry().GetLayoutBoundingRect());
+}
+
 void FBongThumbLiveModule::UpdateSpinners(double Now)
 {
 	SpinnerDraws.Reset();
@@ -1127,7 +1152,7 @@ void FBongThumbLiveModule::UpdateSpinners(double Now)
 					continue;
 				}
 				const FSlateRect TileRect = Viewport->GetPaintSpaceGeometry().GetLayoutBoundingRect();
-				const FSlateRect ClipRect = View->GetPaintSpaceGeometry().GetLayoutBoundingRect();
+				const FSlateRect ClipRect = BongSpinnerClip(Viewport, View);
 				if (TileRect.Right - TileRect.Left < 8.0f || TileRect.Bottom - TileRect.Top < 8.0f || !FSlateRect::DoRectanglesIntersect(TileRect, ClipRect))
 				{
 					continue;
@@ -1269,6 +1294,20 @@ void FBongThumbLiveModule::UpdateHover(double Now)
 void FBongThumbLiveModule::RegisterConsoleCommands()
 {
 	IConsoleManager& CM = IConsoleManager::Get();
+#if WITH_DEV_AUTOMATION_TESTS
+	ConsoleObjects.Add(CM.RegisterConsoleCommand(TEXT("BongThumbLive.TestThumbnailSize"), TEXT("QA fixture: Huge or Medium thumbnails; changes only the disposable test browser."),
+		FConsoleCommandWithArgsDelegate::CreateLambda([this](const TArray<FString>& Args)
+		{
+			UpdateVisibleTiles(FPlatformTime::Seconds() + 1.0);
+			for (const TWeakPtr<SWidget>& Weak : AssetViews)
+			{
+				if (const TSharedPtr<SWidget> View = Weak.Pin())
+				{
+					static_cast<SAssetView*>(View.Get())->SetCurrentThumbnailSize(Args.Num() && Args[0] == TEXT("Huge") ? EThumbnailSize::Huge : EThumbnailSize::Medium);
+				}
+			}
+		}), ECVF_Default));
+#endif
 
 	ConsoleObjects.Add(CM.RegisterConsoleCommand(
 		TEXT("BongThumbLive.LoadFolder"),
@@ -1292,9 +1331,9 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 				if (IsKindEnabled(GetKind(A)))
 				{
 					++Total;
-					if (A.GetAsset())
+					if (FBongThumbLiveModule* Module = GetPtr())
 					{
-						++Loaded;
+						Loaded += Module->QueueAssetLoad(A.GetSoftObjectPath()) ? 1 : 0;
 					}
 				}
 			}
@@ -1871,6 +1910,13 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 	Cache.Tick(Params);
 
 	// Animations on screen are in use (also without the frame cache).
+	if (!bBlocked)
+	{
+		for (const TWeakObjectPtr<UObject>& Weak : VisibleTiles)
+		{
+			if (const UObject* Object = Weak.Get()) { BongOwned::Touch(Object->GetOutermost()->GetFName(), Now); }
+		}
+	}
 	if (bAnims)
 	{
 		for (const FSoftObjectPath& Path : VisibleAnimPaths)
@@ -2100,7 +2146,7 @@ void FBongThumbLiveModule::OnContentBrowserSelectionChanged(const TArray<FAssetD
 		{
 			// v2.2: asynchronous (A.GetAsset() loaded up to 64 packages synchronously on the game thread: measured
 			// ~10 s at ~9 fps when 50 cold animations were selected).
-			LoadPackageAsync(A.PackageName.ToString());
+			QueueAssetLoad(A.GetSoftObjectPath());
 			--Budget;
 		}
 	}
@@ -2235,32 +2281,36 @@ void FBongThumbLiveModule::UpdateFolderAutoLoad(double Now)
 	LastProbeTime = 0.0;
 }
 
+bool FBongThumbLiveModule::QueueAssetLoad(const FSoftObjectPath& Path, bool bRequireAsset)
+{
+	if (Path.IsNull() || Path.ResolveObject() || !GetDefault<UBongThumbLiveSettings>()->bEnabled) { return false; }
+	const FName Package = Path.GetLongPackageFName();
+	if (InFlightPackages.Contains(Package)) { return false; }
+	if (ExplicitPending.Contains(Path))
+	{
+		if (bRequireAsset) { ForceAssetLoads.Add(Package); }
+		return false;
+	}
+	if (ExplicitPending.Num() >= 1024) { return false; }
+	ExplicitPending.Add(Path);
+	if (bRequireAsset) { ForceAssetLoads.Add(Package); }
+	return true;
+}
+
 void FBongThumbLiveModule::PumpAutoLoads()
 {
 	const UBongThumbLiveSettings* Settings = GetDefault<UBongThumbLiveSettings>();
+	if (!Settings->bEnabled)
+	{
+		ExplicitPending.Reset(); ForceAssetLoads.Reset();
+	}
 	if (!Settings->bEnabled || !Settings->bAutoLoadVisibleFolder)
 	{
-		VisiblePending.Reset();
-		PendingAnimPaths.Reset();
-		return;
+		VisiblePending.Reset(); PendingPackages.Reset(); PendingAnimPaths.Reset();
 	}
-	if (PendingPackages.Num() == 0 && VisiblePending.Num() == 0)
-	{
-		return;
-	}
-	if (bMemoryPressure)
-	{
-		return; // paused until memory is available again
-	}
-	if (GEditor && (GEditor->PlayWorld != nullptr || GEditor->bIsSimulatingInEditor))
-	{
-		return;
-	}
-	const int32 Batch = FMath::Clamp(Settings->AutoLoadBatchSize, 1, 64);
-	TWeakPtr<bool> WeakAlive = AliveToken;
-	// Animation tiles that were shown but scrolled away before their load started: drop them from the visible queue
-	// (they are queued again when shown again), so the loads go to what is on screen now.
-	if (VisiblePending.Num() > 0 && Settings->bUseFrameCache)
+	if (bMemoryPressure || (GEditor && (GEditor->PlayWorld || GEditor->bIsSimulatingInEditor))) { return; }
+	if (Settings->bRespectRealTimeThumbnailsToggle && !GetDefault<UContentBrowserSettings>()->RealTimeThumbnails) { return; }
+	if (Settings->bUseFrameCache)
 	{
 		TSet<FSoftObjectPath> OnScreen(VisibleAnimPaths);
 		for (int32 i = VisiblePending.Num() - 1; i >= 0; --i)
@@ -2268,89 +2318,60 @@ void FBongThumbLiveModule::PumpAutoLoads()
 			const FSoftObjectPath* P = PendingAnimPaths.Find(VisiblePending[i]);
 			if (P && !OnScreen.Contains(*P))
 			{
-				VisibleSeen.Remove(VisiblePending[i]);
-				PendingAnimPaths.Remove(VisiblePending[i]);
-				VisiblePending.RemoveAt(i, EAllowShrinking::No);
-				++VisibleDropped;
+				VisibleSeen.Remove(VisiblePending[i]); PendingAnimPaths.Remove(VisiblePending[i]);
+				VisiblePending.RemoveAt(i, EAllowShrinking::No); ++VisibleDropped;
 			}
 		}
 	}
-	while (InFlightLoads < Batch && (VisiblePending.Num() > 0 || PendingPackages.Num() > 0))
+	const int32 Batch = FMath::Clamp(Settings->AutoLoadBatchSize, 1, 64);
+	TWeakPtr<bool> WeakAlive = AliveToken;
+	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	while (InFlightLoads < Batch && (ExplicitPending.Num() || VisiblePending.Num() || PendingPackages.Num()))
 	{
-		// Thumbnails actually on screen first, then the rest of the opened folder.
-		const bool bVisible = VisiblePending.Num() > 0;
-		const FName Next = bVisible ? VisiblePending.Last() : PendingPackages.Last();
-		const FSoftObjectPath* AnimPath = PendingAnimPaths.Find(Next);
-		const FSoftObjectPath AnimAssetPath = AnimPath ? *AnimPath : FSoftObjectPath();
-		if (AnimPath && Settings->bUseFrameCache)
+		const bool bExplicit = ExplicitPending.Num() > 0;
+		const bool bVisible = !bExplicit && VisiblePending.Num() > 0;
+		const FName Package = bExplicit ? ExplicitPending.Last().GetLongPackageFName() : (bVisible ? VisiblePending.Last() : PendingPackages.Last());
+		FSoftObjectPath Path = bExplicit ? ExplicitPending.Last() : FSoftObjectPath(Package.ToString() + TEXT(".") + FPackageName::GetShortName(Package.ToString()));
+		if (const FSoftObjectPath* Known = PendingAnimPaths.Find(Package)) { Path = *Known; }
+		const bool bForce = ForceAssetLoads.Contains(Package);
+		auto Pop = [&]()
+		{
+			if (bExplicit) { ExplicitPending.Pop(EAllowShrinking::No); }
+			else { (bVisible ? VisiblePending : PendingPackages).Pop(EAllowShrinking::No); }
+			PendingAnimPaths.Remove(Package); ForceAssetLoads.Remove(Package);
+		};
+		const UPackage* Existing = FindPackage(nullptr, *Package.ToString());
+		if ((Existing && Existing->IsFullyLoaded()) || InFlightPackages.Contains(Package)) { Pop(); continue; }
+		const FAssetData Data = AR.GetAssetByObjectPath(Path);
+		if (!Data.IsValid() || !IsKindEnabled(GetKind(Data))) { Pop(); continue; }
+		if (Settings->bUseFrameCache && GetKind(Data) == EBongThumbKind::Animation && !bForce)
 		{
 			FBongThumbCache& Cache = FBongThumbCache::Get();
-			if (!Cache.IsDiskReady())
-			{
-				break; // its frames may be on disk: wait for the startup scan
-			}
-			if (Cache.CanPlayWithoutLoading(AnimAssetPath, Next))
-			{
-				(bVisible ? VisiblePending : PendingPackages).Pop(EAllowShrinking::No);
-				PendingAnimPaths.Remove(Next);
-				if (bVisible) { ++VisibleDone; } else { ++AutoLoadDone; }
-				continue; // plays from the cache: never loaded
-			}
-			if (BongOwned::Num(false) >= 12)
-			{
-				break; // at most 12 plugin-loaded animations at a time (released once their frames are cached)
-			}
+			if (!Cache.IsDiskReady()) { break; }
+			if (Cache.CanPlayWithoutLoading(Path, Package)) { Pop(); continue; }
 		}
-		const FName PackageName = bVisible ? VisiblePending.Pop(EAllowShrinking::No) : PendingPackages.Pop(EAllowShrinking::No);
-		PendingAnimPaths.Remove(PackageName);
-		const UPackage* Existing = FindPackage(nullptr, *PackageName.ToString());
-		if (Existing && Existing->IsFullyLoaded())
-		{
-			if (bVisible) { ++VisibleDone; } else { ++AutoLoadDone; }
-			continue;
-		}
-		++InFlightLoads;
-		NoteTileTrace(PackageName, 0);
-		if (!AnimAssetPath.IsNull())
-		{
-			BongOwned::Track(PackageName, AnimAssetPath, /*bMesh*/ false); // loaded by us: released when cached / unused
-		}
-		LoadPackageAsync(PackageName.ToString(), FLoadPackageAsyncDelegate::CreateLambda(
-			[WeakAlive, bVisible](const FName& Name, UPackage* /*Package*/, EAsyncLoadingResult::Type Result)
+		// Every plugin-initiated asset load, including selection and tile recovery, owns a slot.
+		if (GetKind(Data) == EBongThumbKind::Animation && BongOwned::Num(false) >= 12) { break; }
+		Pop();
+		BongOwned::Track(Package, Path, false, GetKind(Data) == EBongThumbKind::Animation);
+		++InFlightLoads; InFlightPackages.Add(Package); NoteTileTrace(Package, 0);
+		LoadPackageAsync(Package.ToString(), FLoadPackageAsyncDelegate::CreateLambda(
+			[WeakAlive, bVisible](const FName& Name, UPackage*, EAsyncLoadingResult::Type Result)
 			{
-				if (WeakAlive.IsValid())
+				if (!WeakAlive.IsValid()) { return; }
+				if (FBongThumbLiveModule* M = FBongThumbLiveModule::GetPtr())
 				{
-					if (FBongThumbLiveModule* M = FBongThumbLiveModule::GetPtr())
+					M->InFlightPackages.Remove(Name);
+					M->InFlightLoads = FMath::Max(0, M->InFlightLoads - 1);
+					FBongThumbLiveModule::NoteTileTrace(Name, 1);
+					if (Result != EAsyncLoadingResult::Succeeded)
 					{
-						M->InFlightLoads = FMath::Max(0, M->InFlightLoads - 1);
-						FBongThumbLiveModule::NoteTileTrace(Name, 1);
-						if (Result != EAsyncLoadingResult::Succeeded)
-						{
-							UE_LOG(LogBongThumbLive, Verbose, TEXT("BongThumbLive auto-load: %s failed (%d)."), *Name.ToString(), (int32)Result);
-						}
-						if (bVisible)
-						{
-							++M->VisibleDone;
-							if (M->VisibleLoaded.Num() >= 1024)
-							{
-								M->VisibleLoaded.RemoveAt(0, 256);
-							}
-							M->VisibleLoaded.Add(Name);
-							M->LastProbeTime = 0.0; // make continuous-mode discovery pick it up right away
-							if (M->VisiblePending.Num() == 0 && M->InFlightLoads == 0)
-							{
-								UE_LOG(LogBongThumbLive, Log, TEXT("BongThumbLive visible auto-load: queue drained (%d / %d loaded)."), M->VisibleDone, M->VisibleQueued);
-							}
-						}
-						else
-						{
-							++M->AutoLoadDone;
-							if (M->PendingPackages.Num() == 0 && M->InFlightLoads == 0)
-							{
-								UE_LOG(LogBongThumbLive, Log, TEXT("BongThumbLive auto-load: %s done (%d loaded)."), *M->AutoLoadFolder, M->AutoLoadDone);
-							}
-						}
+						BongOwned::ReleaseIf([Name](const BongOwned::FInfo& Info) { return Info.Root == Name; });
+						M->VisibleSeen.Remove(Name);
+						UE_LOG(LogBongThumbLive, Verbose, TEXT("BongThumbLive auto-load: %s failed (%d)."), *Name.ToString(), (int32)Result);
 					}
+					if (bVisible) { ++M->VisibleDone; } else { ++M->AutoLoadDone; }
+					M->LastProbeTime = 0.0;
 				}
 			}));
 	}
@@ -2359,3 +2380,76 @@ void FBongThumbLiveModule::PumpAutoLoads()
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FBongThumbLiveModule, BongThumbLive)
+
+#if WITH_DEV_AUTOMATION_TESTS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBongLoadQueueRegressionTest, "BongThumbLive.Loading.Guards", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBongLoadQueueRegressionTest::RunTest(const FString&)
+{
+	UBongThumbLiveSettings* S = GetMutableDefault<UBongThumbLiveSettings>();
+	TGuardValue<bool> Enabled(S->bEnabled, true), Selection(S->bLoadAnimsOnSelection, true), Auto(S->bAutoLoadVisibleFolder, true);
+	TGuardValue<bool> RespectToggle(S->bRespectRealTimeThumbnailsToggle, false);
+	TGuardValue<int32> Batch(S->AutoLoadBatchSize, 4);
+	FBongThumbLiveModule M;
+	M.bMemoryPressure = true;
+	FAssetData A;
+	A.PackageName = TEXT("/Game/BTLRegressionUnloaded"); A.PackagePath = TEXT("/Game"); A.AssetName = TEXT("BTLRegressionUnloaded");
+	A.AssetClassPath = UAnimSequence::StaticClass()->GetClassPathName();
+	M.OnContentBrowserSelectionChanged({A}, true);
+	TestEqual(TEXT("Selection enters the common queue instead of loading immediately"), M.ExplicitPending.Num(), 1);
+	M.PumpAutoLoads();
+	TestEqual(TEXT("Memory guard blocks selection load"), M.InFlightLoads, 0);
+	TestEqual(TEXT("Blocked selection remains queued for recovery"), M.ExplicitPending.Num(), 1);
+	TestFalse(TEXT("Tile recovery merges an existing request"), M.QueueAssetLoad(A.GetSoftObjectPath(), true));
+	TestTrue(TEXT("Recovery marks the request as needing an actual pool asset"), M.ForceAssetLoads.Contains(A.PackageName));
+	M.bMemoryPressure = false; M.InFlightLoads = 4;
+	M.PumpAutoLoads();
+	TestEqual(TEXT("Full batch does not start more loads"), M.InFlightLoads, 4);
+	TestEqual(TEXT("Full batch preserves the pending request"), M.ExplicitPending.Num(), 1);
+	S->bAutoLoadVisibleFolder = false; M.PendingPackages.Add(TEXT("/Game/OldFolder"));
+	M.PumpAutoLoads();
+	TestEqual(TEXT("Disabling auto-load clears its folder queue"), M.PendingPackages.Num(), 0);
+	TestEqual(TEXT("Explicit selection still works independently of auto-load"), M.ExplicitPending.Num(), 1);
+	S->bEnabled = false; M.PumpAutoLoads();
+	TestEqual(TEXT("Disabling the plugin clears explicit requests too"), M.ExplicitPending.Num(), 0);
+	TestEqual(TEXT("Forced recovery flags are cleared"), M.ForceAssetLoads.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBongSpinnerClipRegressionTest, "BongThumbLive.UI.SpinnerClip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBongSpinnerClipRegressionTest::RunTest(const FString&)
+{
+	FBongThumbLiveModule* M = FBongThumbLiveModule::GetPtr();
+	if (!M || !FSlateApplication::IsInitialized()) { AddError(TEXT("Run this UI test in the editor with an animation folder open.")); return false; }
+	M->UpdateVisibleTiles(FPlatformTime::Seconds() + 1.0);
+	int32 Checked = 0, PartialTiles = 0;
+	for (const auto& Pair : M->VisibleTileViewports)
+	{
+		for (const FBongTileViewport& Tile : Pair.Value)
+		{
+			const TSharedPtr<SWidget> VP = Tile.Viewport.Pin(), View = Tile.View.Pin();
+			if (!VP || !View) { continue; }
+			const FSlateRect Clip = BongSpinnerClip(VP, View);
+			const FSlateRect Rect = VP->GetPaintSpaceGeometry().GetLayoutBoundingRect();
+			for (TSharedPtr<SWidget> W = VP; W && W != View; W = W->GetParentWidget())
+			{
+				const FName Type = W->GetType();
+				if (Type == TEXT("SAssetTileView") || Type == TEXT("SAssetListView") || Type == TEXT("SAssetColumnView"))
+				{
+					const FSlateRect Table = W->GetPaintSpaceGeometry().GetLayoutBoundingRect();
+					if (FSlateRect::DoRectanglesIntersect(Rect, Table))
+					{
+						++Checked;
+						TestTrue(TEXT("Overlay clip stays inside the tile table, excluding footer"), Clip.Bottom <= Table.Bottom && Clip.Top >= Table.Top && Clip.Left >= Table.Left && Clip.Right <= Table.Right);
+						if (Rect.Bottom > Table.Bottom) { ++PartialTiles; }
+					}
+					break;
+				}
+			}
+		}
+	}
+	TestTrue(TEXT("Test inspected real thumbnail widgets"), Checked > 0);
+	TestTrue(TEXT("Fixture includes a partially scrolled row"), PartialTiles > 0);
+	AddInfo(FString::Printf(TEXT("Validated %d real tile clips, including %d partially visible tiles."), Checked, PartialTiles));
+	return true;
+}
+#endif

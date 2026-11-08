@@ -129,7 +129,11 @@ private:
 	void RegisterToolbar();
 public:
 	bool IsUnderMemoryPressure() const { return bMemoryPressure; }
+	/** Selection and missing pool textures use the same bounded loader as visible auto-load. */
+	bool QueueAssetLoad(const FSoftObjectPath& Path, bool bRequireAsset = false);
 private:
+	friend class FBongLoadQueueRegressionTest;
+	friend class FBongSpinnerClipRegressionTest;
 public:
 	/** True when the shared pool can render a fresh thumbnail for Obj right now (no stock-thumbnail fallback). */
 	static bool IsRefreshableNow(UObject* Obj);
@@ -173,6 +177,9 @@ private:
 	double LastFolderCheckTime = 0.0;
 	TArray<FName> PendingPackages;
 	int32 InFlightLoads = 0;
+	TSet<FName> InFlightPackages;
+	TArray<FSoftObjectPath> ExplicitPending;
+	TSet<FName> ForceAssetLoads;
 	int32 AutoLoadQueued = 0;
 	int32 AutoLoadDone = 0;
 	/** Visible-thumbnail auto-load (driven by the shared thumbnail pool): not reset on folder change. */

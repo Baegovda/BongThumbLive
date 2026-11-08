@@ -149,8 +149,8 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "캐시", meta = (DisplayName = "애니메이션당 최대 장수", EditCondition = "bEnabled && bUseFrameCache", ClampMin = "8", ClampMax = "1024", UIMin = "30", UIMax = "480"))
 	int32 MaxFramesPerAsset = 240;
 
-	/** 플러그인이 쓸 수 있는 메모리(그래픽 메모리 포함) 총량(MB)입니다. 넘으면 가장 오래 안 본 썸네일부터 메모리에서 빼고(디스크에는 남음), 화면에 다 못 담으면 일부는 캐시 없이 그립니다. */
-	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "캐시", meta = (DisplayName = "메모리 사용 한도 (MB)", EditCondition = "bEnabled && bUseFrameCache", ClampMin = "64", ClampMax = "8192", UIMin = "128", UIMax = "4096"))
+	/** 썸네일 프레임과 저장·불러오기 임시 버퍼가 함께 쓸 수 있는 메모리(MB)입니다. 넘으면 오래 안 본 캐시부터 뺍니다. 캐릭터 메시·텍스처와 엔진·드라이버 메모리는 별도이며, 아래 메모리 보호 옵션으로 제한합니다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadWrite, Category = "캐시", meta = (DisplayName = "프레임 캐시 메모리 한도 (MB)", EditCondition = "bEnabled && bUseFrameCache", ClampMin = "64", ClampMax = "8192", UIMin = "128", UIMax = "4096"))
 	int32 CacheMemoryMB = 1024;
 
 	/** 만든 캐시를 프로젝트의 Saved 폴더에 파일로 저장해서, 에디터를 다시 켜도 바로 움직이게 합니다. 끄면 매번 처음부터 다시 그립니다(무거움). */
