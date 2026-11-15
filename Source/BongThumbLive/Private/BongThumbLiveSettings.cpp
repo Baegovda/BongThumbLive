@@ -16,12 +16,23 @@ void UBongThumbLiveSettings::MigrateLegacyConfig()
 	{
 		return;
 	}
+	// Settings now live engine-wide (config=EditorSettings). Older builds stored them per project in
+	// EditorPerProjectUserSettings.ini (as BongThumbLive, or before that as AnimThumbLive).
 	const FString& Ini = GEditorPerProjectIni;
 	const FString NewSection = GetClass()->GetPathName(); // /Script/BongThumbLive.BongThumbLiveSettings
 	const TCHAR* OldSection = TEXT("/Script/AnimThumbLive.AnimThumbLiveSettings");
-	// Capture this before SaveConfig creates the new section during the schema upgrade.
-	const bool bImportLegacy = !GConfig->DoesSectionExist(*NewSection, Ini) && GConfig->DoesSectionExist(OldSection, Ini);
+	// Capture these before SaveConfig creates the engine-wide section during the schema upgrade.
+	const bool bHasEngineWide = GConfig->DoesSectionExist(*NewSection, GEditorSettingsIni);
+	const bool bImportProject = !bHasEngineWide && GConfig->DoesSectionExist(*NewSection, Ini);
+	const bool bImportLegacy = !bHasEngineWide && !bImportProject && GConfig->DoesSectionExist(OldSection, Ini);
 	bool bUpgraded = false;
+	if (bImportProject)
+	{
+		// Same keys, different file: read this project's values, then persist them engine-wide below.
+		LoadConfig(GetClass(), *Ini);
+		bUpgraded = true;
+		UE_LOG(LogBongThumbLive, Log, TEXT("BongThumbLive: imported per-project settings into engine-wide EditorSettings.ini."));
+	}
 	// v2: memory budget default raised 256 -> 1024 MB (GPU atlas cache), held-mesh cap added.
 	if (SettingsVersion < 2)
 	{
@@ -59,7 +70,7 @@ void UBongThumbLiveSettings::MigrateLegacyConfig()
 void UBongThumbLiveSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent); // broadcasts OnSettingChanged
-	// Persist right away to the per-user ini (the settings page also saves; this covers Details edits elsewhere).
+	// Persist right away to the engine-wide per-user ini (the settings page also saves; this covers Details edits elsewhere).
 	SaveConfig();
 	if (FBongThumbLiveModule* Module = FBongThumbLiveModule::GetPtr())
 	{
