@@ -32,11 +32,13 @@ enum class EBongSpinnerStyle : uint8
 
 /**
  * Project Settings > Plugins > Bong Thumb Live
- * Stored per-user (Saved/Config/<Platform>Editor/EditorPerProjectUserSettings.ini) so it never dirties
- * shared project config. Every option is editable from the settings page and applies immediately.
+ * Stored engine-wide per user (%LOCALAPPDATA%/UnrealEngine/<Version>/Saved/Config/<Platform>Editor/EditorSettings.ini),
+ * so every project opened with this engine shares the same values and project config is never dirtied.
+ * Values saved by older builds in a project's EditorPerProjectUserSettings.ini are imported once (MigrateLegacyConfig).
+ * Every option is editable from the settings page and applies immediately.
  * Per-asset-type option labels are drawn in the Content Browser type colour (FBongThumbLiveSettingsCustomization).
  */
-UCLASS(config = EditorPerProjectUserSettings, BlueprintType, meta = (DisplayName = "Bong Thumb Live"))
+UCLASS(config = EditorSettings, BlueprintType, meta = (DisplayName = "Bong Thumb Live"))
 class BONGTHUMBLIVE_API UBongThumbLiveSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
@@ -45,16 +47,15 @@ public:
 	UBongThumbLiveSettings();
 
 	/**
-	 * UDeveloperSettings::GetContainerName() maps config=EditorPerProjectUserSettings to the "Editor"
-	 * container (Editor Preferences). Force the "Project" container so the page lives under
-	 * Project Settings > Plugins while the values stay in the per-user ini.
+	 * Keep the page under Project Settings > Plugins (where users already look for it) while the values
+	 * live in the engine-wide per-user EditorSettings.ini.
 	 */
 	virtual FName GetContainerName() const override { return TEXT("Project"); }
 	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
 	virtual FName GetSectionName() const override { return TEXT("BongThumbLive"); }
 #if WITH_EDITOR
 	virtual FText GetSectionText() const override { return NSLOCTEXT("BongThumbLive", "Section", "Bong Thumb Live"); }
-	virtual FText GetSectionDescription() const override { return NSLOCTEXT("BongThumbLive", "SectionDescKo", "콘텐츠 브라우저 썸네일을 실시간으로 움직이게 합니다: 애니메이션 재생, 머티리얼 시간 애니메이션, 나이아가라/캐스케이드 파티클 시뮬레이션. 설정은 사용자별로 저장됩니다."); }
+	virtual FText GetSectionDescription() const override { return NSLOCTEXT("BongThumbLive", "SectionDescKo", "콘텐츠 브라우저 썸네일을 실시간으로 움직이게 합니다: 애니메이션 재생, 머티리얼 시간 애니메이션, 나이아가라/캐스케이드 파티클 시뮬레이션. 설정은 엔진 전체에 저장되어 모든 프로젝트가 같은 값을 씁니다."); }
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
