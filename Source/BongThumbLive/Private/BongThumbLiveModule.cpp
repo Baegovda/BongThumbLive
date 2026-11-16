@@ -132,6 +132,14 @@ static FAutoConsoleVariableRef CVarBongSceneBudgetWaitingMs(
 // vs mode 2: avg 4.9-5.3 s, max ~24 s; hitches > 100 ms 4-7 vs 2-3 per 145 s; same 113 complete caches at the end.
 // (On UE 5.7, 2026-10-30, mode 1 caused ~150 hitches and was rejected; mode 2 was the default then.)
 static int32 GBongReleaseAfterCoarse = 1;
+// Cap on animations the plugin itself has loaded at once (load slots). Each slot holds one AnimSequence (preview meshes
+// are capped separately by MaxHeldPreviewMeshes). Visible tiles queue for a slot, so this bounds cold-load throughput.
+// Default 24 since 2026-11-16 (UE 5.8, cold 113-anim folder, 2 runs each): avg new-tile-to-shown 12: 1.65/1.46 s,
+// 24: 1.32/1.38 s, 32: 1.25/1.29 s; max 5.3/4.3, 3.8/4.2, 3.8/4.0 s; peak private memory 1.9-2.0 GB for all three.
+static int32 GBongMaxLoadedAnims = 24;
+static FAutoConsoleVariableRef CVarBongMaxLoadedAnims(
+	TEXT("BongThumbLive.MaxLoadedAnims"), GBongMaxLoadedAnims,
+	TEXT("Maximum animations loaded by the plugin at the same time (load slots for tiles without cached frames). Preview meshes are capped separately."));
 static FAutoConsoleVariableRef CVarBongReleaseAfterCoarse(
 	TEXT("BongThumbLive.ReleaseAfterCoarse"), GBongReleaseAfterCoarse,
 	TEXT("While visible tiles wait for one of the 12 anim slots (cap unchanged): 1 = free a slot once its coarse frames exist (reloads later), 2 = free a finished+saved anim's slot at once instead of after 3 s."));
@@ -2076,7 +2084,7 @@ void FBongThumbLiveModule::TickCache(double Now, bool bBlocked)
 	// animations as soon as their frames are cached (the cache plays them without the asset), preview meshes after
 	// 10 s without use, anything after 30 s off screen, everything under memory pressure.
 	const bool bCacheOn = Settings->bUseFrameCache;
-	const bool bSlotsWanted = GBongReleaseAfterCoarse != 0 && VisiblePending.Num() > 0 && BongOwned::Num(false) >= 12;
+	const bool bSlotsWanted = GBongReleaseAfterCoarse != 0 && VisiblePending.Num() > 0 && BongOwned::Num(false) >= FMath::Max(1, GBongMaxLoadedAnims);
 	BongOwned::ReleaseIf([&](const BongOwned::FInfo& Info)
 	{
 		if (bMemoryPressure)
@@ -2424,7 +2432,7 @@ void FBongThumbLiveModule::PumpAutoLoads()
 			if (Cache.CanPlayWithoutLoading(Path, Package)) { Pop(); continue; }
 		}
 		// Every plugin-initiated asset load, including selection and tile recovery, owns a slot.
-		if (GetKind(Data) == EBongThumbKind::Animation && BongOwned::Num(false) >= 12) { break; }
+		if (GetKind(Data) == EBongThumbKind::Animation && BongOwned::Num(false) >= FMath::Max(1, GBongMaxLoadedAnims)) { break; }
 		Pop();
 		BongOwned::Track(Package, Path, false, GetKind(Data) == EBongThumbKind::Animation);
 		++InFlightLoads; InFlightPackages.Add(Package); NoteTileTrace(Package, 0);

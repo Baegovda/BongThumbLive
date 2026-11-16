@@ -43,9 +43,29 @@ $saved = @{}
 $i = 0
 foreach ($f in $files) { if (Test-Path $f) { $dst = Join-Path $backup ("${i}_" + (Split-Path $f -Leaf)); Copy-Item $f $dst; $saved[$f] = $dst }; $i++ }
 
+# Create the main window on the side monitor from the start. The editor main frame reads its first placement from
+# [RootWindow] in the project's EditorPerProjectUserSettings.ini (FRootWindowLocation, DPI-unscaled; the side monitor
+# is 100 %). Point it at the side monitor for this run; the file is restored afterwards. The move loop stays as fallback.
+$ppIni = $files[3]
+New-Item -ItemType Directory -Force (Split-Path $ppIni) | Out-Null
+$lines = if (Test-Path $ppIni) { [IO.File]::ReadAllLines($ppIni) } else { @() }
+$out = New-Object System.Collections.Generic.List[string]
+$skip = $false
+foreach ($l in $lines) {
+	if ($l -match '^\[(.+)\]$') { $skip = ($matches[1] -eq 'RootWindow') }
+	if (-not $skip) { $out.Add($l) }
+}
+$out.Add('[RootWindow]')
+$out.Add("ScreenPosition=X=$X.000 Y=$Y.000")
+$out.Add("WindowSize=X=$W.000 Y=$H.000")
+$out.Add('InitiallyMaximized=False')
+[IO.File]::WriteAllLines($ppIni, $out)
+Write-Host "RootWindow: main window placed at $X,$Y ${W}x$H for this run"
+
 $p = Start-Process $Editor -ArgumentList ("`"$Project`" -nosplash " + $EditorArgs) -PassThru
 $moved = @{}
 $lastRect = '(none)'
+$peakPrivate = 0
 $deadline = (Get-Date).AddSeconds($TimeoutSec)
 $SWP_NOACTIVATE = 0x0010; $SWP_NOZORDER = 0x0004
 while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
@@ -68,9 +88,11 @@ while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
 			}
 		}
 	}
+	try { $p.Refresh(); $peakPrivate = [Math]::Max($peakPrivate, $p.PrivateMemorySize64) } catch {}
 	Start-Sleep -Milliseconds 300
 }
 Write-Host "last main-window rect before exit: $lastRect"
+Write-Host ("peakPrivateGB={0:N2}" -f ($peakPrivate / 1GB))
 if (-not $p.HasExited) { Write-Host "TIMEOUT: editor pid $($p.Id) still running" } else { Write-Host "exit $($p.ExitCode)" }
 
 foreach ($f in $saved.Keys) { Copy-Item $saved[$f] $f -Force }

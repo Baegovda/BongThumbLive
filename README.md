@@ -1,6 +1,6 @@
 > **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
-# BongThumbLive 2.2.1 (Unreal Engine 5.8 editor plugin)
+# BongThumbLive 2.2.2 (Unreal Engine 5.8 editor plugin)
 
 Live, looping Content Browser thumbnails:
 
@@ -9,6 +9,9 @@ Live, looping Content Browser thumbnails:
 | Animation Sequence / Montage / Composite | the clip plays in a loop on its preview mesh |
 | Material / Material Instance | Time / Panner / Sine driven nodes animate |
 | Niagara System, Cascade Particle System | the effect is simulated in a small preview world |
+
+## What's new in 2.2.2
+- **More load slots.** The plugin may hold 24 animations at once while building caches (was 12; console variable `BongThumbLive.MaxLoadedAnims`). UE 5.8, 113-animation folder, empty cache: tiles appear after about 1.35 s on average (was about 1.55 s), the slowest after about 4 s (was 4.3-5.3 s). Peak editor memory was the same (1.9-2.0 GB). The preview-mesh cap is unchanged.
 
 ## What's new in 2.2.1
 - **Faster first look at a new folder.** While tiles still wait, an animation's load slot is freed as soon as its first coarse frames exist (`BongThumbLive.ReleaseAfterCoarse 1`). UE 5.8, 113-animation folder with an empty cache: tiles appear after 1.4-3 s on average (was about 5 s), the slowest after 4-10 s (was about 24 s). The memory caps are unchanged, and every cache still finishes.
