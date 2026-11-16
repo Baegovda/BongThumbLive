@@ -1,6 +1,6 @@
 > **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
-# BongThumbLive 2.1 (Unreal Engine 5.7 editor plugin)
+# BongThumbLive 2.1 (Unreal Engine 5.8 editor plugin)
 
 Live, looping Content Browser thumbnails:
 
@@ -26,10 +26,10 @@ Live, looping Content Browser thumbnails:
 - The cache section of the settings page shows the cache folder, an "open folder" button and a "clear cache" (캐시 비우기) button.
 
 ## Install
-Copy the `BongThumbLive` folder into `<Project>/Plugins/` and restart the editor. The release zip contains prebuilt Win64 binaries for UE 5.7. To build from source instead, use `RunUAT BuildPlugin`.
+Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Engine>/Plugins/Marketplace/` (every project on that engine) and restart the editor. The source targets UE 5.8 (`EngineVersion 5.8.0`). The v2.1 release zip contains prebuilt Win64 binaries for UE 5.7 only. To build from source, use `RunUAT BuildPlugin`.
 
 ## Settings
-**Project Settings > Plugins > Bong Thumb Live**, or the gear icon in the Content Browser. The settings are saved per user.
+**Project Settings > Plugins > Bong Thumb Live**, or the gear icon in the Content Browser. The settings are saved per user for the whole engine (`EditorSettings`), so every project on the same engine shares them. Values saved per project by older builds are imported once. The frame cache stays per project.
 
 ## Console commands
 | Command | Purpose |
@@ -42,7 +42,7 @@ Copy the `BongThumbLive` folder into `<Project>/Plugins/` and restart the editor
 | `BongThumbLive.RecreateRenderState 0/1` | 1 (default) = exact pose for every cached frame |
 
 ## Notes
-- Win64 / editor only. Tested with D3D11 on UE 5.7.
+- Win64 / editor only. Tested with D3D11 on UE 5.7. The UE 5.8 port builds, but the regression suite has not been re-run on 5.8 yet.
 - Filling the cache for a large folder costs editor frame time once (a few seconds per screen of new animations). After that, playback is essentially free.
 - The disk cache is safe to delete at any time.
 
@@ -57,7 +57,7 @@ Copy the `BongThumbLive` folder into `<Project>/Plugins/` and restart the editor
 - The optional MCP helper has a lockfile; use `npm ci` in `Tools/btl_mcp`.
 
 ## Regression tests
-Run only in a **disposable UE 5.7 project**, with PythonScriptPlugin and EditorScriptingUtilities enabled and copied animation fixtures (the default runner folder is listed in the script). Create an empty `BTL_DISPOSABLE_TEST_PROJECT` marker in that project directory. The runner creates three rendering fixtures under `/Game/BTLRegression` and 256 unsaved UI tiles; it must not be run in a working art project.
+Run only in a **disposable UE 5.8 project**, with PythonScriptPlugin and EditorScriptingUtilities enabled and copied animation fixtures (the default runner folder is listed in the script). Create an empty `BTL_DISPOSABLE_TEST_PROJECT` marker in that project directory. The runner creates three rendering fixtures under `/Game/BTLRegression` and 256 unsaved UI tiles; it must not be run in a working art project.
 
 Launch the disposable project with `-d3d11 -unattended -AutoDeclinePackageRecovery -ExecCmds="py <repo>/Tools/Tests/run_editor_regressions.py" -ReportExportPath=<report-dir> -TestExit="Automation Test Queue Empty" -ini:EditorSettings:[/Script/UnrealEd.EditorPerformanceSettings]:bThrottleCPUWhenNotForeground=False`.
 

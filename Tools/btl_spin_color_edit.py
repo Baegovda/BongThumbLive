@@ -1,5 +1,5 @@
 import shutil,io
-base=r"K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive\Source\BongThumbLive"
+base=r"K:\Epic Games\UE_5.8\Engine\Plugins\Marketplace\BongThumbLive\Source\BongThumbLive"
 sh=base+r"\Public\BongThumbLiveSettings.h"; mc=base+r"\Private\BongThumbLiveModule.cpp"
 shutil.copy2(sh,sh+".bak4"); shutil.copy2(mc,mc+".bak12")
 def rd(p): return open(p,encoding="utf-8-sig").read()

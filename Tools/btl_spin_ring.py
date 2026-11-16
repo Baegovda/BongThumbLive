@@ -1,4 +1,4 @@
-p=r"K:\Unreal Projects\UE_VFX_57\Plugins\BongThumbLive\Source\BongThumbLive\Private\BongThumbLiveModule.cpp"
+p=r"K:\Epic Games\UE_5.8\Engine\Plugins\Marketplace\BongThumbLive\Source\BongThumbLive\Private\BongThumbLiveModule.cpp"
 m=open(p,encoding="utf-8-sig").read()
 a="FSlateDrawElement::MakeLines(OutDrawElements, LayerId, Geo, Ring,"
 b="FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, Geo, Ring,"

@@ -2357,7 +2357,7 @@ namespace BongOwned
 				continue;
 			}
 			TArray<UObject*> Objects;
-			GetObjectsWithPackage(Package, Objects, true);
+			GetObjectsWithPackage(Package, Objects, EGetObjectsFlags::IncludeNestedObjects);
 			bool bKeep = false;
 			for (UObject* Object : Objects)
 			{

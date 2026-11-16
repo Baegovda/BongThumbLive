@@ -9,7 +9,7 @@
 	"CanContainContent": false,
 	"IsBetaVersion": false,
 	"Installed": false,
-	"EngineVersion": "5.7.0",
+	"EngineVersion": "5.8.0",
 	"Modules": [
 		{
 			"Name": "BongThumbLive",
