@@ -88,6 +88,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 - Keep the plugin's memory caps: 1024 MB GPU frame cache, 6 meshes / 12 anims, MinFreeMemoryGB 8, MaxDiskCacheMB 2048.
 - Settings UI text stays Korean and beginner-friendly.
 - Every test run starts with an empty plugin disk cache (user request 2026-10-30).
+- Runtime tests run in the background from now on (user request 2026-11-16): do not disturb the user's desktop, but never minimise or hide the test editor. A minimised editor runs at ~3 fps, screenshots fail and the plugin skips Content Browsers in non-visible windows (`visibleViews=0`), so the data would be wrong. Unfocused/covered is fine with `bThrottleCPUWhenNotForeground=False`. Preferred: put the test editor on a side monitor (verify the placement works); compare only runs with the same window size.
 - Commits: fast-forward only, never force-push. No new release.
 - Screenshots: `%TEMP%\btl_shots\`; commit small ones to `Docs/` if useful.
 - Update this file after every meaningful step, then commit and push it. The repo copy is the only source of truth.
