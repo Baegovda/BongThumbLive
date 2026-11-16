@@ -8,7 +8,7 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - **Live plugin is installed in the engine**, not in a project: `K:\Epic Games\UE_5.8\Engine\Plugins\Marketplace\BongThumbLive` (`.uplugin` has `EngineVersion 5.8.0`, `Installed true`). Binaries built 2026-11-15 23:31. On 2026-11-16 its `Source` matched repo `main` (9a69106) except line endings. No `.bakN` files exist there yet. This folder is NOT a git repo.
 - Test project: `K:\Unreal Projects\UE_VFX_58\UE_VFX_58.uproject` (enables BongThumbLive; the project has no `Plugins\BongThumbLive`). Disk cache `K:\Unreal Projects\UE_VFX_58\Saved\BongThumbLive\Cache`. Log `K:\Unreal Projects\UE_VFX_58\Saved\Logs\UE_VFX_58.log`.
 - Git clone used for commits: `C:\workspace\BongThumbLive` (origin https://github.com/Baegovda/BongThumbLive.git, public). The old `%TEMP%\BongThumbLive_repo` and the Codex `Documents\Codex\...` checkout are gone.
-- Repo moved to UE 5.8 on 2026-11-16 (user approved): `.uplugin` `EngineVersion 5.8.0`, `Tools/` paths point at UE 5.8 / UE_VFX_58, the one 5.8 deprecation (`GetObjectsWithPackage` bool overload, Cache.cpp) uses `EGetObjectsFlags`. Clean build: `%TEMP%\BongThumbLive_pkg58b`, 0 warnings, log `%TEMP%\btl_pkg58b_build.log`. **Not deployed yet**: the engine copy still has the 2026-11-15 binaries (same code apart from that one line).
+- Repo moved to UE 5.8 on 2026-11-16 (user approved): `.uplugin` `EngineVersion 5.8.0`, `Tools/` paths point at UE 5.8 / UE_VFX_58, the one 5.8 deprecation (`GetObjectsWithPackage` bool overload, Cache.cpp) uses `EGetObjectsFlags`. Clean build: `%TEMP%\BongThumbLive_pkg58b`, 0 warnings, log `%TEMP%\btl_pkg58b_build.log`. **Deployed 2026-11-16 12:5x KST** into the engine copy (dll/pdb/modules + Cache.cpp; previous files kept as `.bak1` = 2026-11-15 build; SHA-256 equal to pkg58b). The user's UE 5.8 editor was closed with CloseMainWindow (clean exit) first. Smoke: UE_VFX_58 launched with `-ExecCmds="BongThumbLive.Status,QUIT_EDITOR"`: DLL loaded from the engine path, renderers/pool hook/toolbar registered, disk cache ready (14 files), Status OK, clean `LogExit`, no BongThumbLive errors (log `%TEMP%\btl_smoke58.log`). No Content Browser was visible in that run, so no tile was rendered.
 - Settings are engine-wide since 2026-11-15 (`config=EditorSettings`, PR #1 / c68b614); old per-project values are imported once. The frame cache stays per project.
 - PC tools (checked 2026-11-16): gh logged in as Baegovda, Python 3.10 `C:\Program Files\Python310\python.exe`, Node v26.13.0.
 - Agent: Claude Code (desktop app) runs directly on the PC. No box, CopyToBox or machine id is needed.
@@ -76,7 +76,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 
 ## Open items
 1. Port check on UE 5.8: re-run the automation tests and a cold-cache smoke with the engine-installed plugin.
-2. Deploy pkg58b into the engine copy (close all UE 5.8 editors first, back up dll/pdb/modules as `.bak1`). Repo port itself is done (2026-11-16).
+2. Done 2026-11-16: repo port + pkg58b deployed (rollback = copy the `.bak1` files back).
 3. Manual tooltip check by Baegovda (hover a setting on the BongThumbLive settings page).
 4. Optional: cold-DDC folder-click run; v2.2 readiness report (no release).
 
