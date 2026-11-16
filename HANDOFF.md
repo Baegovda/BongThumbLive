@@ -24,6 +24,13 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## v2.2 released (2026-11-16 15:05 KST)
+- Owner said all open questions were mine to decide (on phone, away). Decisions: **released v2.2**; TightFraming stays on; the owner's "Niagara System" type filter on CB tab 1 is left as is (looks intentional for VFX work); test/debug console commands stay in (inert unless typed).
+- Release: tag `v2.2` = 1c20a43, https://github.com/Baegovda/BongThumbLive/releases/tag/v2.2, asset `BongThumbLive-v2.2-UE5.8-Win64.zip` (dll + modules + Source + Config + README, no pdb; staged from `%TEMP%\BongThumbLive_pkg58m`). v2.1 stays the UE 5.7 build.
+- `.uplugin` Version 4 / VersionName 2.2 (repo and engine copy; engine `.uplugin.bak1` = 2.1).
+- New automation test `BongThumbLive.Settings.KoreanTooltips` (34 editable settings have Korean name + tooltip, which the details panel shows on hover). Suite 8/8 on pkg58m (`%TEMP%\btl_auto58m`).
+- Deployed: pkg58m (engine binaries `.bak7` = pkg58l).
+
 ## Autonomous session (2026-11-16 14:00-14:45 KST, user away)
 - Tooltips: all 35 settings have Korean doc-comment tooltips (static check). Hover check still manual.
 - Spinner styles verified live on 5.8 (`Tools/btl_spin58_test.py`, `Docs/spinner_styles_ue58.png`): Spin/Pulse/Dots/Bar, colour and speed change at runtime. Dots are real filled dots (commit ce19434 is now verified).
@@ -105,8 +112,8 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 ## Open items
 1. Automation tests on UE 5.8: done (7/7, 2026-11-16). Live tiles in the real UE_VFX_58 checked 2026-11-16 (they move; see "Live check" section). Small framing of first-person anim tiles fixed (TightFraming).
 2. Done 2026-11-16: repo port + pkg58b deployed (rollback = copy the `.bak1` files back).
-3. Manual tooltip check by Baegovda (hover a setting on the BongThumbLive settings page).
-4. v2.2 readiness report written (`Docs/V2.2_READINESS.md`). Release only on the owner's go (bump VersionName then).
+3. Tooltips: covered by the KoreanTooltips automation test; a by-eye hover is optional.
+4. v2.2 released 2026-11-16. No further release without a new request.
 
 ---
 # History (UE 5.7 era; paths below are stale)
