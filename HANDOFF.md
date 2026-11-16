@@ -24,6 +24,14 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## v2.2.2 released (2026-11-16 ~20:10 KST)
+- Tag v2.2.2 = 2a91e0f, https://github.com/Baegovda/BongThumbLive/releases/tag/v2.2.2 (zip from %TEMP%\BongThumbLive_pkg222).
+- **MaxLoadedAnims** (new cvar `BongThumbLive.MaxLoadedAnims`, was a hard-coded 12): default 24. Cold A/B in the side-monitor test project, 113-anim folder, 2 runs each, avg / max new-tile-to-shown: 12: 1.65, 1.46 / 5.3, 4.3 s; 24: 1.32, 1.38 / 3.8, 4.2 s; 32: 1.25, 1.29 / 3.8, 4.0 s. Peak private memory 1.9-2.0 GB for all (launcher now prints peakPrivateGB). Default-build run: 1.40 / 4.5 s, ownedAnimRoots max 24. Preview-mesh cap 6 unchanged. The owner asked for this (raising the old fixed 12) on 2026-11-16.
+- Suite 8/8 on pkg222, run as a **project plugin** copy in BTLTest58 (the owner's own UE 5.8 editor, pid 5808 opened 20:01, held the engine dll; it was not closed). The copy was removed afterwards.
+- **Engine deploy pending:** `Tools/btl_deploy_when_free.ps1 -Pkg pkg222 -VersionName 2.2.2 -Version 6` waits (up to 12 h) until no editor holds the dll, then deploys and bumps the engine .uplugin. If the engine copy still says 2.2.1, run it again (the package is %TEMP%\BongThumbLive_pkg222).
+- Test editors now open directly on the side monitor: the launcher writes [RootWindow] ScreenPosition/WindowSize/InitiallyMaximized into the project's EditorPerProjectUserSettings.ini for the run (FRootWindowLocation reads it; restored afterwards). The move loop stays as a fallback.
+- Live check of 2.2.1 in UE_VFX_58 (side monitor, cold plugin cache): 28 tiles on screen, all live, avg 1.57 s, max 2.73 s, no errors (log %TEMP%tl_live221.log).
+
 ## v2.2.1 released (2026-11-16 ~16:00 KST)
 - Tag v2.2.1 = a055d19, https://github.com/Baegovda/BongThumbLive/releases/tag/v2.2.1, asset BongThumbLive-v2.2.1-UE5.8-Win64.zip (from %TEMP%\BongThumbLive_pkg221). Content: ReleaseAfterCoarse default 1 (below). Same code as pkg58n (suite 8/8) plus the version bump; deployed to the engine copy (binaries .bak2 = pkg58n, .bak8 = v2.2; uplugin .bak2 = 2.2).
 
@@ -98,7 +106,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 
 ## Repo / releases
 - v2.1 released: tag commit 9b3050e. main is at 9a69106 (PR #1 merged 2026-11-15).
-- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1 (UE 5.8).
+- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2 (UE 5.8).
 
 ## Build
 - `"K:\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin -Plugin="C:\workspace\BongThumbLive\BongThumbLive.uplugin" -Package=C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_pkgN -TargetPlatforms=Win64 -Rocket`. BuildPlugin builds a HostProject copy, so it works while the editor runs. The repo `.uplugin` EngineVersion should match 5.8 first.
