@@ -24,6 +24,13 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## Live check in the real UE_VFX_58 (2026-11-16 13:47 KST)
+- Tool: `Tools/btl_live58_check.py` (read-only; opens CB tab 1, syncs to `/Game/Props/PrecisionSniperRifle/Character/Animations`, clears type filters, Status + shots at +3/8/15/30 s with pairs 0.4 s apart, quits). Plugin disk cache cleared before the run.
+- Result (cold plugin cache): `visibleViews=1`, 63 anim tiles on screen; live 12 at +3 s, 23 at +8 s, 29 at +15 s, 48 at +30 s. newTileToShown avg 12.9 s, max 29.2 s at +30 s (cold). Shot pairs differ by 11-14k px inside the tile grid, so the tiles move. No BongThumbLive errors. Shots `%TEMP%\btl_shots\live58\`, log `%TEMP%\btl_live58c.log`.
+- Observations (not investigated): waiting tiles show the pool's floor/checker render with the yellow spinner; cached tiles show a dark background with a small rifle in the upper middle (framing looks small for these weapon anims; compare with a 5.7 shot before changing anything).
+- **User state:** the user's Content Browser tab 1 has the "Niagara System" type filter on. It is stored engine-wide in `%LOCALAPPDATA%\UnrealEngine\Editor\FilterBar.json` (`ContentBrowserTab1.TypeFilters`). The check backs it up and restores it; it was restored byte-identical. Project `EditorPerProjectUserSettings.ini` (selected path, open NS_Fireball) and engine `EditorLayout.ini` were also restored from `%TEMP%\btl_live58_backup\`.
+- A first attempt was invalid: the editor window was minimised during the run (≈3 fps, screenshots failed, `visibleViews=0`). Ask the user not to touch the window during a live check.
+
 ## Last finished work: full audit fixes (2026-11-08, UE 5.7 era)
 - All nine audit fixes were implemented, tested, deployed to the then-current UE_VFX_57 plugin, and merged to main (PR #1, together with the engine-wide settings change). No release or tag.
 - Fixes: common guarded load queue; PID/project-bound watchdog; mesh/skeleton dependency invalidation; job generations/file revisions; byte leases covering worker/GPU lifetimes; legacy config import; sub-1-FPS clip sampling (cache key version 2); bounded header parsing; spinner table/tile clipping.
@@ -85,7 +92,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 - Update this file after every meaningful step, then commit and push it. The repo copy is the only source of truth.
 
 ## Open items
-1. Automation tests on UE 5.8: done (7/7, 2026-11-16). Still to do: look at live tiles in the real UE_VFX_58 Content Browser (the GetAllChildren fix), and a cold-cache smoke there.
+1. Automation tests on UE 5.8: done (7/7, 2026-11-16). Live tiles in the real UE_VFX_58 checked 2026-11-16 (they move; see "Live check" section). Open: the small framing of cached weapon-anim tiles.
 2. Done 2026-11-16: repo port + pkg58b deployed (rollback = copy the `.bak1` files back).
 3. Manual tooltip check by Baegovda (hover a setting on the BongThumbLive settings page).
 4. Optional: cold-DDC folder-click run; v2.2 readiness report (no release).
