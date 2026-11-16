@@ -1,6 +1,6 @@
 > **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
-# BongThumbLive 2.1 (Unreal Engine 5.8 editor plugin)
+# BongThumbLive 2.2 (Unreal Engine 5.8 editor plugin)
 
 Live, looping Content Browser thumbnails:
 
@@ -9,6 +9,15 @@ Live, looping Content Browser thumbnails:
 | Animation Sequence / Montage / Composite | the clip plays in a loop on its preview mesh |
 | Material / Material Instance | Time / Panner / Sine driven nodes animate |
 | Niagara System, Cascade Particle System | the effect is simulated in a small preview world |
+
+## What's new in 2.2
+- **UE 5.8.** Built for 5.8. The 5.8 Content Browser hides its asset view inside an `SInvalidationPanel`; 2.2 finds it, so tiles animate on 5.8.
+- **Better framing.** Animation tiles are framed on the skinned mesh itself, not on the engine bounds. Meshes such as first-person arms (root at the floor, wide reference pose) were tiny; they now fill the tile. `BongThumbLive.TightFraming 0` restores the old framing. Old caches are rebuilt once.
+- **Smoother cache generation.** A render-thread budget for offscreen renders, asynchronous loads on selection and incremental GC remove the long hitches while new frames are made.
+- **No stuck tiles.** Black tiles, stock icons and scrolled-in tiles that waited for a mouse hover now animate. Cached frames are pushed into every tile size the browser shows.
+- **Loading indicator.** A tile shows a spinner until its first frame. Colour, style (Spin, Pulse, Dots, Bar) and speed are settings.
+- **Settings for the whole engine.** Settings are shared by every project on the same engine. Values from older builds are imported once.
+- The audit fixes listed below.
 
 ## What's new in 2.1
 - **Memory leak fix.** In earlier versions the editor could grow to tens of GB. The visible-thumbnail auto-load loaded every animation on screen. Each of those loads pulled in a full preview mesh with its materials and textures. Editor assets are kept with `RF_Standalone`, so nothing was ever garbage-collected. The held-mesh list had no cap, and the 256 MB frame cache was too small, so frames were re-rendered forever. 2.1 adds these limits:
@@ -26,7 +35,7 @@ Live, looping Content Browser thumbnails:
 - The cache section of the settings page shows the cache folder, an "open folder" button and a "clear cache" (캐시 비우기) button.
 
 ## Install
-Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Engine>/Plugins/Marketplace/` (every project on that engine) and restart the editor. The source targets UE 5.8 (`EngineVersion 5.8.0`). The v2.1 release zip contains prebuilt Win64 binaries for UE 5.7 only. To build from source, use `RunUAT BuildPlugin`.
+Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Engine>/Plugins/Marketplace/` (every project on that engine) and restart the editor. The source targets UE 5.8 (`EngineVersion 5.8.0`). The v2.2 release zip contains prebuilt Win64 binaries for UE 5.8; v2.1 is the last UE 5.7 build. To build from source, use `RunUAT BuildPlugin`.
 
 ## Settings
 **Project Settings > Plugins > Bong Thumb Live**, or the gear icon in the Content Browser. The settings are saved per user for the whole engine (`EditorSettings`), so every project on the same engine shares them. Values saved per project by older builds are imported once. The frame cache stays per project.
@@ -46,7 +55,7 @@ Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Eng
 - Filling the cache for a large folder costs editor frame time once (a few seconds per screen of new animations). After that, playback is essentially free.
 - The disk cache is safe to delete at any time.
 
-## Audit fixes (2026-11-08, unreleased)
+## Audit fixes (2026-11-08, in 2.2)
 - Selection, visible auto-load and missing-tile recovery share the memory guard and async batch limit. Plugin-loaded animation roots remain capped at 12; preview meshes remain capped at 6 by default.
 - Saving or editing a preview mesh/skeleton invalidates dependent frames immediately. Package signatures are also rechecked while entries are in memory.
 - Cache jobs carry generation stamps. Clear, rename and removal discard obsolete work; file revisions prevent delayed deletes/index writes from overwriting newer results.

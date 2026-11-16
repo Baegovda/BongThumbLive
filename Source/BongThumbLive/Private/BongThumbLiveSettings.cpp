@@ -78,3 +78,34 @@ void UBongThumbLiveSettings::PostEditChangeProperty(FPropertyChangedEvent& Prope
 	}
 }
 #endif
+
+#if WITH_DEV_AUTOMATION_TESTS
+#include "Misc/AutomationTest.h"
+#include "UObject/UnrealType.h"
+
+// The details panel shows FProperty::GetToolTipText() on hover; check every editable setting has a Korean tooltip and name.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBongSettingsTooltipTest, "BongThumbLive.Settings.KoreanTooltips", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBongSettingsTooltipTest::RunTest(const FString&)
+{
+	auto HasHangul = [](const FString& S)
+	{
+		for (const TCHAR C : S) { if (C >= 0xAC00 && C <= 0xD7A3) { return true; } }
+		return false;
+	};
+	int32 Checked = 0;
+	for (TFieldIterator<FProperty> It(UBongThumbLiveSettings::StaticClass()); It; ++It)
+	{
+		const FProperty* Prop = *It;
+		if (!Prop->HasAllPropertyFlags(CPF_Config | CPF_Edit)) { continue; }
+		++Checked;
+		const FString Tip = Prop->GetToolTipText().ToString();
+		const FString Name = Prop->GetDisplayNameText().ToString();
+		TestTrue(FString::Printf(TEXT("%s has a Korean tooltip"), *Prop->GetName()), HasHangul(Tip) && Tip.Len() >= 10);
+		TestTrue(FString::Printf(TEXT("%s has a Korean display name"), *Prop->GetName()), HasHangul(Name));
+		TestNotEqual(FString::Printf(TEXT("%s tooltip differs from its name"), *Prop->GetName()), Tip, Name);
+	}
+	TestTrue(TEXT("Settings were inspected"), Checked >= 30);
+	AddInfo(FString::Printf(TEXT("Checked %d editable settings."), Checked));
+	return true;
+}
+#endif
