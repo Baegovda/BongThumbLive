@@ -1,8 +1,8 @@
 # Launch a UE 5.8 editor for a runtime test without disturbing the user's desktop.
 # - Moves the editor's windows to the side monitor (default: top-left 1080p, X=-1920 Y=-1080) without activating them.
 # - Never minimises it: a minimised editor runs at ~3 fps and the plugin skips hidden Content Browsers (wrong data).
-# - Backs up and restores the per-user files a run can change: FilterBar.json, EditorLayout.ini and the
-#   project's EditorPerProjectUserSettings.ini.
+# - Backs up and restores the per-user files a run can change: FilterBar.json, EditorLayout.ini, EditorSettings.ini
+#   (engine-wide BongThumbLive settings) and the project's EditorPerProjectUserSettings.ini.
 # Note: PowerShell variables are case-insensitive; never name a window handle $h/$w/$x/$y here.
 # Call it in-process (& .\btl_launch_bg.ps1 ...): with pwsh -File an -EditorArgs value starting with '-' is mis-parsed.
 # Usage: & btl_launch_bg.ps1 -Project <uproject> -EditorArgs '<extra args>' [-LogCopy <path>] [-TimeoutSec 1500]
@@ -35,6 +35,8 @@ New-Item -ItemType Directory -Force $backup | Out-Null
 $files = @(
 	(Join-Path $env:LOCALAPPDATA 'UnrealEngine\Editor\FilterBar.json'),
 	(Join-Path $env:LOCALAPPDATA 'UnrealEngine\5.8\Saved\Config\WindowsEditor\EditorLayout.ini'),
+	# Engine-wide plugin settings live here (config=EditorSettings); test runs change them via BongThumbLive.Set.
+	(Join-Path $env:LOCALAPPDATA 'UnrealEngine\5.8\Saved\Config\WindowsEditor\EditorSettings.ini'),
 	(Join-Path $ProjDir 'Saved\Config\WindowsEditor\EditorPerProjectUserSettings.ini')
 )
 $saved = @{}

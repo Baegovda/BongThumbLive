@@ -24,6 +24,15 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## Autonomous session (2026-11-16 14:00-14:45 KST, user away)
+- Tooltips: all 35 settings have Korean doc-comment tooltips (static check). Hover check still manual.
+- Spinner styles verified live on 5.8 (`Tools/btl_spin58_test.py`, `Docs/spinner_styles_ue58.png`): Spin/Pulse/Dots/Bar, colour and speed change at runtime. Dots are real filled dots (commit ce19434 is now verified).
+- TightFraming cost: Status line now ends with `framing: tight= skinnedBox calls= avg= max= fallbacks=`. 40k-vertex cap measured 1.12 ms avg / 7.6 ms max per pose (9 poses per anim, game thread); cap lowered to 10k: 0.37 / 2.1 ms. Cold speed A/B (side monitor): on 5.49/5.16 (40k), 5.32/4.76 (10k); off 4.43/6.55 s avg new-tile-to-shown: noise. Logs `%TEMP%\btl_speed_tf*.log`.
+- New tools: `Tools/btl_launch_bg.ps1` (side monitor, now also restores EditorSettings.ini), `Tools/btl_speed_bg.ps1` (cold speed run in BTLTest58), `Tools/btl_build_deploy58.ps1` (BuildPlugin with retry while another worker's UBT runs, deploy with .bakN backups; `-NoDeploy`, `-SkipBuild`). `btl_speed_test.py` now opens the CB tab and clears filters.
+- Deployed: pkg58l. Engine-copy binaries `.bak4` = pkg58j, `.bak5` = pkg58k (duplicate deploy), `.bak6` = pkg58k. Regression 7/7 on pkg58l (`%TEMP%\btl_auto58k`).
+- Readiness report: `Docs/V2.2_READINESS.md` (no release made).
+- Other workers build with UE 5.8 on this PC: UBT is single-instance (`ConflictingInstance`); the build script waits and retries.
+
 ## Live check in the real UE_VFX_58 (2026-11-16 13:47 KST)
 - Tool: `Tools/btl_live58_check.py` (read-only; opens CB tab 1, syncs to `/Game/Props/PrecisionSniperRifle/Character/Animations`, clears type filters, Status + shots at +3/8/15/30 s with pairs 0.4 s apart, quits). Plugin disk cache cleared before the run.
 - Result (cold plugin cache): `visibleViews=1`, 63 anim tiles on screen; live 12 at +3 s, 23 at +8 s, 29 at +15 s, 48 at +30 s. newTileToShown avg 12.9 s, max 29.2 s at +30 s (cold). Shot pairs differ by 11-14k px inside the tile grid, so the tiles move. No BongThumbLive errors. Shots `%TEMP%\btl_shots\live58\`, log `%TEMP%\btl_live58c.log`.
@@ -97,7 +106,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 1. Automation tests on UE 5.8: done (7/7, 2026-11-16). Live tiles in the real UE_VFX_58 checked 2026-11-16 (they move; see "Live check" section). Small framing of first-person anim tiles fixed (TightFraming).
 2. Done 2026-11-16: repo port + pkg58b deployed (rollback = copy the `.bak1` files back).
 3. Manual tooltip check by Baegovda (hover a setting on the BongThumbLive settings page).
-4. Optional: cold-DDC folder-click run; v2.2 readiness report (no release).
+4. v2.2 readiness report written (`Docs/V2.2_READINESS.md`). Release only on the owner's go (bump VersionName then).
 
 ---
 # History (UE 5.7 era; paths below are stale)

@@ -51,6 +51,8 @@ class UBongThumbLiveRenderer : public UDefaultSizedThumbnailRenderer
 
 	/** Preview-mesh resolver (cached, never loads synchronously). */
 	static FString GetResolveStats();
+	/** Skinned-vertex framing cost (BongThumbLive.TightFraming): calls, average/max ms, fallbacks to component bounds. */
+	static FString GetFramingStats();
 	/** True while the resolver has given up on this animation (no usable preview mesh: the tile keeps the stock icon). */
 	static bool HasGivenUp(const FSoftObjectPath& AnimPath);
 	/** Forget resolved / failed preview meshes (e.g. a skeleton's preview mesh changed). */

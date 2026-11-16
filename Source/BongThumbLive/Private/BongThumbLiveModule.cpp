@@ -203,8 +203,9 @@ void FBongThumbLiveModule::NoteSceneRender()
 
 FString FBongThumbLiveModule::GetRenderGovernorStats()
 {
-	return FString::Printf(TEXT("sceneRenders: %lld, rt %.2f ms each, allowance %d/frame (budget %.1f ms, max %d), deferred=%lld, waiting=%d earlyReleases=%lld"),
-		GBongScenesRendered, GBongSceneRtMs.load(), GBongSceneAllowance, GBongSceneBudgetMs, GBongMaxScenesPerFrame, GBongScenesDeferred, GBongTilesWaiting ? 1 : 0, GBongEarlyReleases);
+	return FString::Printf(TEXT("sceneRenders: %lld, rt %.2f ms each, allowance %d/frame (budget %.1f ms, max %d), deferred=%lld, waiting=%d earlyReleases=%lld | %s"),
+		GBongScenesRendered, GBongSceneRtMs.load(), GBongSceneAllowance, GBongSceneBudgetMs, GBongMaxScenesPerFrame, GBongScenesDeferred, GBongTilesWaiting ? 1 : 0, GBongEarlyReleases,
+		*UBongThumbLiveRenderer::GetFramingStats());
 }
 
 float FBongThumbLiveModule::GetLoopTime(const UAnimSequenceBase* Anim)

@@ -12,6 +12,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Rendering/SkeletalMeshModel.h"
+#include "Misc/ScopeExit.h"
 #include "Rendering/SkeletalMeshLODModel.h"
 #include "SceneView.h"
 #include "ShowFlags.h"
@@ -411,6 +412,8 @@ static uint64 GBongLastCheapPoseFrame = ~0ull;
 // physics asset / reference pose and can be far larger than what is visible (first-person arms: root at the floor,
 // A-pose arms 140 cm wide), which made the mesh tiny in the tile. Debug toggle only; it is not part of the cache key.
 static int32 GBongTightFraming = 1;
+static int64 GBongSkinnedBoxCalls = 0, GBongSkinnedBoxFallbacks = 0;
+static double GBongSkinnedBoxMsTotal = 0.0, GBongSkinnedBoxMsMax = 0.0;
 static FAutoConsoleVariableRef CVarBongTightFraming(
 	TEXT("BongThumbLive.TightFraming"),
 	GBongTightFraming,
@@ -638,6 +641,15 @@ private:
 		{
 			return false;
 		}
+		const double StartTime = FPlatformTime::Seconds();
+		ON_SCOPE_EXIT
+		{
+			const double Ms = (FPlatformTime::Seconds() - StartTime) * 1000.0;
+			++GBongSkinnedBoxCalls;
+			GBongSkinnedBoxMsTotal += Ms;
+			GBongSkinnedBoxMsMax = FMath::Max(GBongSkinnedBoxMsMax, Ms);
+			if (!OutBox.IsValid) { ++GBongSkinnedBoxFallbacks; }
+		};
 		const USkeletalMeshComponent* Comp = PreviewActor->GetSkeletalMeshComponent();
 		const USkeletalMesh* Mesh = Comp->GetSkeletalMeshAsset();
 		const FSkeletalMeshModel* Model = Mesh ? Mesh->GetImportedModel() : nullptr;
@@ -652,7 +664,9 @@ private:
 		{
 			return false;
 		}
-		const int32 Stride = FMath::Max(1, static_cast<int32>(LOD.NumVertices) / 40000); // cap the work on huge meshes
+		// At most ~10k vertices: measured 1.1 ms avg / 7.6 ms max per pose with a 40k cap, and it runs 9x per anim on the
+		// game thread. Neighbouring vertices are dense, so a subsample keeps the box within a few percent.
+		const int32 Stride = FMath::Max(1, static_cast<int32>(LOD.NumVertices) / 10000);
 		const FTransform& ToWorld = Comp->GetComponentTransform();
 		for (const FSkelMeshSection& Section : LOD.Sections)
 		{
@@ -720,6 +734,12 @@ FString UBongThumbLiveRenderer::GetResolveStats()
 	return FString::Printf(TEXT("meshResolve: slots=%d fast=%lld slow=%lld asyncLoads=%lld inFlight=%d gaveUp=%d (total %lld) heldMeshes=%d (cap %d) ownedMeshRoots=%d ownedAnimRoots=%d"),
 		GBongMeshSlots.Num(), GBongResolveFast, GBongResolveSlow, GBongResolveAsyncLoads, GBongMeshLoadsInFlight.Num(), GaveUp, GBongResolveGaveUp,
 		GBongMeshHolder ? GBongMeshHolder->Meshes.Num() : 0, GetDefault<UBongThumbLiveSettings>()->MaxHeldPreviewMeshes, BongOwned::Num(true), BongOwned::Num(false));
+}
+
+FString UBongThumbLiveRenderer::GetFramingStats()
+{
+	return FString::Printf(TEXT("framing: tight=%d skinnedBox calls=%lld avg=%.2f ms max=%.2f ms fallbacks=%lld"), GBongTightFraming,
+		GBongSkinnedBoxCalls, GBongSkinnedBoxCalls ? GBongSkinnedBoxMsTotal / GBongSkinnedBoxCalls : 0.0, GBongSkinnedBoxMsMax, GBongSkinnedBoxFallbacks);
 }
 
 bool UBongThumbLiveRenderer::HasGivenUp(const FSoftObjectPath& AnimPath)

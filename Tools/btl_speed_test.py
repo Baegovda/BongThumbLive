@@ -11,7 +11,10 @@ def setup():
     os.makedirs(SHOTS, exist_ok=True)
     cmd("BongThumbLive.Set Mode VisibleInBrowser"); cmd("BongThumbLive.Set MaxFPS 60"); cmd("BongThumbLive.TileTrace 1")
     for c in [x for x in CV.split(";") if x.strip()]: cmd(c.strip()); log("cvar " + c.strip())
-    unreal.EditorUtilityLibrary.sync_browser_to_folders([FOLDER]); log("opened t=%.2f" % (time.time() - T0)); st["measure"] = True
+    cmd("BongThumbLive.OpenBrowserTab")  # UE 5.8 layouts may only have the Content Drawer
+    unreal.EditorUtilityLibrary.sync_browser_to_folders([FOLDER])
+    cmd("BongThumbLive.ClearBrowserFilters")  # a saved type filter can hide every anim tile (launcher restores FilterBar.json)
+    log("opened t=%.2f" % (time.time() - T0)); st["measure"] = True
 plan = [(20, setup)]
 for k in range(21, 140, 2): plan.append((k, (lambda: (cmd("BongThumbLive.Status")))))
 for d in (1, 3, 8, 22): plan.append((20 + d, (lambda n: lambda: shot(n))("open_%02d" % d)))
