@@ -128,7 +128,10 @@ static float GBongSceneBudgetWaitingMs = 0.f;
 static FAutoConsoleVariableRef CVarBongSceneBudgetWaitingMs(
 	TEXT("BongThumbLive.SceneRenderBudgetWaitingMs"), GBongSceneBudgetWaitingMs,
 	TEXT("Render-thread budget while visible anim tiles still wait for their first frame (0 = use SceneRenderBudgetMs)."));
-static int32 GBongReleaseAfterCoarse = 2; // A/B 2026-10-30: scrolled-in tiles 0.34 s -> 0.09 s avg
+// Default 1 since 2026-11-16 (UE 5.8, cold 113-anim folder, 2 runs each): new-tile-to-shown avg 2.00/1.74 s, max 6.4/5.6 s
+// vs mode 2: avg 4.9-5.3 s, max ~24 s; hitches > 100 ms 4-7 vs 2-3 per 145 s; same 113 complete caches at the end.
+// (On UE 5.7, 2026-10-30, mode 1 caused ~150 hitches and was rejected; mode 2 was the default then.)
+static int32 GBongReleaseAfterCoarse = 1;
 static FAutoConsoleVariableRef CVarBongReleaseAfterCoarse(
 	TEXT("BongThumbLive.ReleaseAfterCoarse"), GBongReleaseAfterCoarse,
 	TEXT("While visible tiles wait for one of the 12 anim slots (cap unchanged): 1 = free a slot once its coarse frames exist (reloads later), 2 = free a finished+saved anim's slot at once instead of after 3 s."));

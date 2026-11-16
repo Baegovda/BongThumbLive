@@ -5,7 +5,8 @@ param(
 	[Parameter(Mandatory)] [string]$Tag,
 	[string]$Cvars = '',
 	[string]$Project = 'C:\workspace\BTLTest58\BTLTest58.uproject',
-	[string]$Folder = '/Game/Props/PrecisionSniperRifle/Character/Animations'
+	[string]$Folder = '/Game/Props/PrecisionSniperRifle/Character/Animations',
+	[switch]$Warm # keep the plugin disk cache (folder-click latency with cached frames)
 )
 $ErrorActionPreference = 'Stop'
 $T = $env:TEMP
@@ -14,7 +15,7 @@ Copy-Item "$Tools\btl_speed_test.py", "$Tools\btl_speed_parse.py" $T -Force
 Set-Content "$T\btl_speed_cfg.txt" "$Tag | $Folder | $Cvars"
 $ProjDir = Split-Path $Project
 $Cache = Join-Path $ProjDir 'Saved\BongThumbLive\Cache'
-if (Test-Path $Cache) { Get-ChildItem $Cache -File | Remove-Item -Force }
+if (-not $Warm -and (Test-Path $Cache)) { Get-ChildItem $Cache -File | Remove-Item -Force }
 "cache files after clear: $((Get-ChildItem $Cache -File -EA 0).Count)"
 $ea = '-AutoDeclinePackageRecovery -ini:EditorSettings:[/Script/UnrealEd.EditorPerformanceSettings]:bThrottleCPUWhenNotForeground=False ' +
 	"-ExecCmds=`"py $T\btl_speed_test.py`""

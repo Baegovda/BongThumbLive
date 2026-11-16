@@ -45,6 +45,7 @@ foreach ($f in $files) { if (Test-Path $f) { $dst = Join-Path $backup ("${i}_" +
 
 $p = Start-Process $Editor -ArgumentList ("`"$Project`" -nosplash " + $EditorArgs) -PassThru
 $moved = @{}
+$lastRect = '(none)'
 $deadline = (Get-Date).AddSeconds($TimeoutSec)
 $SWP_NOACTIVATE = 0x0010; $SWP_NOZORDER = 0x0004
 while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
@@ -57,6 +58,7 @@ while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
 		$r = New-Object BTL.Win+RECT; [void][BTL.Win]::GetWindowRect($hwnd, [ref]$r)
 		if ([BTL.Win]::IsIconic($hwnd)) { [void][BTL.Win]::ShowWindow($hwnd, 4) } # SW_SHOWNOACTIVATE: never stay minimised
 		$big = ($r.R - $r.L) -ge 800
+		if ($big) { $lastRect = "$($r.L),$($r.T) $($r.R - $r.L)x$($r.B - $r.T)" }
 		if ($big -and ($r.L -ne $X -or $r.T -ne $Y)) {
 			[void][BTL.Win]::SetWindowPos($hwnd, [IntPtr]::Zero, $X, $Y, $W, $H, $SWP_NOACTIVATE -bor $SWP_NOZORDER)
 			if (-not $moved.ContainsKey([int64]$hwnd)) {
@@ -68,6 +70,7 @@ while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
 	}
 	Start-Sleep -Milliseconds 300
 }
+Write-Host "last main-window rect before exit: $lastRect"
 if (-not $p.HasExited) { Write-Host "TIMEOUT: editor pid $($p.Id) still running" } else { Write-Host "exit $($p.ExitCode)" }
 
 foreach ($f in $saved.Keys) { Copy-Item $saved[$f] $f -Force }
