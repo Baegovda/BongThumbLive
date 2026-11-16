@@ -1,6 +1,6 @@
 > **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
-# BongThumbLive 2.2 (Unreal Engine 5.8 editor plugin)
+# BongThumbLive 2.2.1 (Unreal Engine 5.8 editor plugin)
 
 Live, looping Content Browser thumbnails:
 
@@ -9,6 +9,9 @@ Live, looping Content Browser thumbnails:
 | Animation Sequence / Montage / Composite | the clip plays in a loop on its preview mesh |
 | Material / Material Instance | Time / Panner / Sine driven nodes animate |
 | Niagara System, Cascade Particle System | the effect is simulated in a small preview world |
+
+## What's new in 2.2.1
+- **Faster first look at a new folder.** While tiles still wait, an animation's load slot is freed as soon as its first coarse frames exist (`BongThumbLive.ReleaseAfterCoarse 1`). UE 5.8, 113-animation folder with an empty cache: tiles appear after 1.4-3 s on average (was about 5 s), the slowest after 4-10 s (was about 24 s). The memory caps are unchanged, and every cache still finishes.
 
 ## What's new in 2.2
 - **UE 5.8.** Built for 5.8. The 5.8 Content Browser hides its asset view inside an `SInvalidationPanel`; 2.2 finds it, so tiles animate on 5.8.
@@ -35,7 +38,7 @@ Live, looping Content Browser thumbnails:
 - The cache section of the settings page shows the cache folder, an "open folder" button and a "clear cache" (캐시 비우기) button.
 
 ## Install
-Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Engine>/Plugins/Marketplace/` (every project on that engine) and restart the editor. The source targets UE 5.8 (`EngineVersion 5.8.0`). The v2.2 release zip contains prebuilt Win64 binaries for UE 5.8; v2.1 is the last UE 5.7 build. To build from source, use `RunUAT BuildPlugin`.
+Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Engine>/Plugins/Marketplace/` (every project on that engine) and restart the editor. The source targets UE 5.8 (`EngineVersion 5.8.0`). The v2.2.x release zips contain prebuilt Win64 binaries for UE 5.8; v2.1 is the last UE 5.7 build. To build from source, use `RunUAT BuildPlugin`.
 
 ## Settings
 **Project Settings > Plugins > Bong Thumb Live**, or the gear icon in the Content Browser. The settings are saved per user for the whole engine (`EditorSettings`), so every project on the same engine shares them. Values saved per project by older builds are imported once. The frame cache stays per project.
