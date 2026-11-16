@@ -40,15 +40,24 @@ def tick(dt):
     if age>8 and not state['opened']:
         state['opened']=True
         unreal.SystemLibrary.execute_console_command(None,'BongThumbLive.Set Mode VisibleInBrowser')
+        # A fresh UE 5.8 layout only has the Content Drawer; dock a real browser tab first.
+        unreal.SystemLibrary.execute_console_command(None,'BongThumbLive.OpenBrowserTab')
         unreal.EditorUtilityLibrary.sync_browser_to_folders([ui_folder])
     if age>12 and not state['sized']:
         state['sized']=True
+        # A type filter left on in this browser would hide every fixture tile.
+        unreal.SystemLibrary.execute_console_command(None,'BongThumbLive.ClearBrowserFilters')
         unreal.SystemLibrary.execute_console_command(None,'BongThumbLive.TestThumbnailSize Huge')
     if age>15 and not state['scrolled']:
         state['scrolled']=True
         unreal.SystemLibrary.execute_console_command(None,'BongThumbLive.ScrollBrowser 0.5')
+    if age>18 and not state.get('scrolled2'):
+        # UE 5.8 re-lays out the tile view after the size change and can drop the first scroll.
+        state['scrolled2']=True
+        unreal.SystemLibrary.execute_console_command(None,'BongThumbLive.ScrollBrowser 0.5')
     if age>20 and not state['run']:
         state['run']=True
         unreal.unregister_slate_post_tick_callback(state['handle'])
+        unreal.SystemLibrary.execute_console_command(None,'BongThumbLive.Status') # tile/view counts for the log
         unreal.SystemLibrary.execute_console_command(None,'Automation RunTests BongThumbLive.')
 state['handle']=unreal.register_slate_post_tick_callback(tick)

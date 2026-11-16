@@ -42,7 +42,7 @@ Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Eng
 | `BongThumbLive.RecreateRenderState 0/1` | 1 (default) = exact pose for every cached frame |
 
 ## Notes
-- Win64 / editor only. Tested with D3D11 on UE 5.7. The UE 5.8 port builds, but the regression suite has not been re-run on 5.8 yet.
+- Win64 / editor only. Tested with D3D11 on UE 5.7. On UE 5.8 the automation suite passes (7/7, 2026-11-16).
 - Filling the cache for a large folder costs editor frame time once (a few seconds per screen of new animations). After that, playback is essentially free.
 - The disk cache is safe to delete at any time.
 

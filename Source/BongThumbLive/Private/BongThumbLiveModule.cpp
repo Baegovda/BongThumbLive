@@ -40,6 +40,9 @@
 #include "IContentBrowserSingleton.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/Docking/TabManager.h"
+#include "Widgets/Docking/SDockTab.h"
+#include "SFilterList.h"
 #include "Widgets/Views/STableViewBase.h"
 #include "HAL/IConsoleManager.h"
 #include "ImageUtils.h"
@@ -737,7 +740,7 @@ static void BongCollectAssetViews(const TSharedRef<SWidget>& Widget, TArray<TWea
 	{
 		return;
 	}
-	FChildren* Children = Widget->GetChildren();
+	FChildren* Children = Widget->GetAllChildren();
 	for (int32 i = 0; Children && i < Children->Num(); ++i)
 	{
 		BongCollectAssetViews(Children->GetChildAt(i), Out, Depth + 1);
@@ -770,7 +773,7 @@ static void BongCollectViewportSizes(const TSharedRef<SWidget>& Widget, TArray<F
 		}
 		return;
 	}
-	FChildren* Children = Widget->GetChildren();
+	FChildren* Children = Widget->GetAllChildren();
 	for (int32 i = 0; Children && i < Children->Num(); ++i)
 	{
 		BongCollectViewportSizes(Children->GetChildAt(i), Out, Depth + 1, OutWidgets);
@@ -816,7 +819,7 @@ static void BongCollectTileTags(const TSharedRef<SWidget>& Widget, TSet<FString>
 			return; // a tile: nothing more below
 		}
 	}
-	FChildren* Children = Widget->GetChildren();
+	FChildren* Children = Widget->GetAllChildren();
 	for (int32 i = 0; Children && i < Children->Num(); ++i)
 	{
 		BongCollectTileTags(Children->GetChildAt(i), Out, Depth + 1, OutSizes, OutViewports, View);
@@ -1471,6 +1474,72 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 		ECVF_Default));
 
 	ConsoleObjects.Add(CM.RegisterConsoleCommand(
+		TEXT("BongThumbLive.OpenBrowserTab"),
+		TEXT("Debug/tests: open docked Content Browser tab 1 (layouts that only have the Content Drawer show no asset view)."),
+		FConsoleCommandDelegate::CreateLambda([this]()
+		{
+			const TSharedPtr<SDockTab> Tab = FGlobalTabmanager::Get()->TryInvokeTab(FTabId(TEXT("ContentBrowserTab1")));
+			LastAssetViewScanTime = 0.0;
+			LastVisibleScanTime = 0.0;
+			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.OpenBrowserTab: %s"), Tab.IsValid() ? TEXT("opened") : TEXT("failed"));
+		}),
+		ECVF_Default));
+
+	ConsoleObjects.Add(CM.RegisterConsoleCommand(
+		TEXT("BongThumbLive.ClearBrowserFilters"),
+		TEXT("Debug/tests: disable every active type filter in all open Content Browsers."),
+		FConsoleCommandDelegate::CreateLambda([this]()
+		{
+			int32 Cleared = 0;
+			TFunction<void(const TSharedRef<SWidget>&, int32)> Visit = [&](const TSharedRef<SWidget>& W, int32 Depth)
+			{
+				if (W->GetType() == TEXT("SFilterList"))
+				{
+					static_cast<SFilterList&>(W.Get()).DisableAllFilters();
+					++Cleared;
+					return;
+				}
+				FChildren* Children = Depth < 96 ? W->GetAllChildren() : nullptr;
+				for (int32 i = 0; Children && i < Children->Num(); ++i) { Visit(Children->GetChildAt(i), Depth + 1); }
+			};
+			for (const TSharedRef<SWindow>& Window : FSlateApplication::Get().GetInteractiveTopLevelWindows()) { Visit(Window, 0); }
+			LastAssetViewScanTime = 0.0;
+			LastVisibleScanTime = 0.0;
+			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.ClearBrowserFilters: %d filter bar(s)"), Cleared);
+		}),
+		ECVF_Default));
+
+	ConsoleObjects.Add(CM.RegisterConsoleCommand(
+		TEXT("BongThumbLive.DumpBrowserWidgets"),
+		TEXT("Debug: log the widget types under every SContentBrowser (depth, visibility, child count; max 6000 lines)."),
+		FConsoleCommandDelegate::CreateLambda([]()
+		{
+			int32 Lines = 0;
+			TFunction<void(const TSharedRef<SWidget>&, int32, bool)> Visit = [&](const TSharedRef<SWidget>& W, int32 Depth, bool bInside)
+			{
+				if (Lines > 6000 || Depth > 120) { return; }
+				const FString Type = W->GetTypeAsString();
+				const bool bNowInside = bInside || Type == TEXT("SContentBrowser");
+				FChildren* Children = W->GetAllChildren();
+				const int32 Num = Children ? Children->Num() : 0;
+				if (bNowInside)
+				{
+					++Lines;
+					UE_LOG(LogBongThumbLive, Display, TEXT("BTLW %*s%s vis=%s children=%d"), Depth, TEXT(""), *Type, *W->GetVisibility().ToString(), Num);
+				}
+				for (int32 i = 0; i < Num; ++i) { Visit(Children->GetChildAt(i), Depth + 1, bNowInside); }
+			};
+			TFunction<void(const TSharedRef<SWindow>&, int32)> VisitWindow = [&](const TSharedRef<SWindow>& Window, int32 Depth)
+			{
+				Visit(Window, 0, false);
+				if (Depth < 8) { for (const TSharedRef<SWindow>& Child : Window->GetChildWindows()) { VisitWindow(Child, Depth + 1); } }
+			};
+			for (const TSharedRef<SWindow>& Window : FSlateApplication::Get().GetInteractiveTopLevelWindows()) { VisitWindow(Window, 0); }
+			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.DumpBrowserWidgets: %d lines"), Lines);
+		}),
+		ECVF_Default));
+
+	ConsoleObjects.Add(CM.RegisterConsoleCommand(
 		TEXT("BongThumbLive.ScrollBrowser"),
 		TEXT("Debug: scroll every visible Content Browser asset view. Usage: BongThumbLive.ScrollBrowser <rows to add | top | bottom>"),
 		FConsoleCommandWithArgsDelegate::CreateLambda([this](const TArray<FString>& Args)
@@ -1492,7 +1561,7 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 					++Scrolled;
 					return;
 				}
-				FChildren* Children = Depth < 64 ? W->GetChildren() : nullptr;
+				FChildren* Children = Depth < 64 ? W->GetAllChildren() : nullptr;
 				for (int32 i = 0; Children && i < Children->Num(); ++i)
 				{
 					Visit(Children->GetChildAt(i), Depth + 1);
@@ -2440,7 +2509,8 @@ bool FBongSpinnerClipRegressionTest::RunTest(const FString&)
 					{
 						++Checked;
 						TestTrue(TEXT("Overlay clip stays inside the tile table, excluding footer"), Clip.Bottom <= Table.Bottom && Clip.Top >= Table.Top && Clip.Left >= Table.Left && Clip.Right <= Table.Right);
-						if (Rect.Bottom > Table.Bottom) { ++PartialTiles; }
+						// Cut by either edge of the table (UE 5.8 lays out rows so the bottom cut can fall in the label).
+						if (Rect.Bottom > Table.Bottom || Rect.Top < Table.Top) { ++PartialTiles; }
 					}
 					break;
 				}

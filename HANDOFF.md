@@ -14,6 +14,16 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Agent: Claude Code (desktop app) runs directly on the PC. No box, CopyToBox or machine id is needed.
 - `Tools/*.ps1|py` hard-code the UE 5.8 / UE_VFX_58 paths (updated 2026-11-16, not yet run on 5.8).
 
+## UE 5.8 regression run + Content Browser fix (2026-11-16)
+- **Real 5.8 bug found and fixed:** UE 5.8 wraps parts of the Content Browser (incl. the asset view) in `SInvalidationPanel`, whose `GetChildren()` is empty while it caches. All plugin widget walks used `GetChildren()`, so on 5.8 the plugin found **no asset view** (`visibleViews=0`) and live tiles could not start. All walks now use `GetAllChildren()` (Module.cpp). Verified in the test project: `visibleViews=1`, `tiles on screen=96 live=96`. Not yet checked by eye in UE_VFX_58.
+- New debug/test console commands: `BongThumbLive.OpenBrowserTab` (dock Content Browser tab 1; fresh 5.8 layouts only have the Content Drawer), `BongThumbLive.ClearBrowserFilters` (disable type filters, which hid all fixture tiles once), `BongThumbLive.DumpBrowserWidgets` (widget types under SContentBrowser, max 6000 lines). Build.cs now also depends on `EditorWidgets`, `ToolWidgets` (for `SFilterList`).
+- SpinnerClip test counts a tile cut by the top or the bottom edge as partial (5.8 row layout put the bottom cut into the label). The runner `Tools/Tests/run_editor_regressions.py` opens the tab, clears filters, scrolls again at +18 s and logs Status before the tests.
+- **Result: 7/7 automation tests passed** on UE 5.8 (96 real tile clips, 12 partial). Report `%TEMP%\btl_auto58g\index.json`, log `%TEMP%\btl_auto58g.log`, shot `%TEMP%\btl_shots\cb58c.png`.
+- Disposable test project: `C:\workspace\BTLTest58` (marker `BTL_DISPOSABLE_TEST_PROJECT`, copy of `/Game/Props/PrecisionSniperRifle` from UE_VFX_58). Launch: `"C:\workspace\BTLTest58\BTLTest58.uproject" -d3d11 -unattended -AutoDeclinePackageRecovery -ExecCmds="py C:/workspace/BongThumbLive/Tools/Tests/run_editor_regressions.py" -ReportExportPath=<dir> -TestExit="Automation Test Queue Empty" -ini:EditorSettings:[/Script/UnrealEd.EditorPerformanceSettings]:bThrottleCPUWhenNotForeground=False`.
+- Deployed into the engine copy: pkg58i (`%TEMP%\BongThumbLive_pkg58i`). Engine-copy backups: binaries `.bak1` = 2026-11-15 build, `.bak2` = pkg58b; `Private\BongThumbLiveModule.cpp.bak1`, `Private\BongThumbLiveCache.cpp.bak1`, `BongThumbLive.Build.cs.bak1` = 2026-11-15 source.
+- Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
+- Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
+
 ## Last finished work: full audit fixes (2026-11-08, UE 5.7 era)
 - All nine audit fixes were implemented, tested, deployed to the then-current UE_VFX_57 plugin, and merged to main (PR #1, together with the engine-wide settings change). No release or tag.
 - Fixes: common guarded load queue; PID/project-bound watchdog; mesh/skeleton dependency invalidation; job generations/file revisions; byte leases covering worker/GPU lifetimes; legacy config import; sub-1-FPS clip sampling (cache key version 2); bounded header parsing; spinner table/tile clipping.
@@ -75,7 +85,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 - Update this file after every meaningful step, then commit and push it. The repo copy is the only source of truth.
 
 ## Open items
-1. Port check on UE 5.8: re-run the automation tests and a cold-cache smoke with the engine-installed plugin.
+1. Automation tests on UE 5.8: done (7/7, 2026-11-16). Still to do: look at live tiles in the real UE_VFX_58 Content Browser (the GetAllChildren fix), and a cold-cache smoke there.
 2. Done 2026-11-16: repo port + pkg58b deployed (rollback = copy the `.bak1` files back).
 3. Manual tooltip check by Baegovda (hover a setting on the BongThumbLive settings page).
 4. Optional: cold-DDC folder-click run; v2.2 readiness report (no release).
