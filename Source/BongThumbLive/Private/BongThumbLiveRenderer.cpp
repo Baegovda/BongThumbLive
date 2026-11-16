@@ -11,6 +11,8 @@
 #include "Animation/Skeleton.h"
 #include "Engine/SkeletalMesh.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Rendering/SkeletalMeshModel.h"
+#include "Rendering/SkeletalMeshLODModel.h"
 #include "SceneView.h"
 #include "ShowFlags.h"
 #include "UObject/ObjectKey.h"
@@ -405,6 +407,15 @@ static FAutoConsoleVariableRef CVarBongRecreateRenderState(
 
 static uint64 GBongLastCheapPoseFrame = ~0ull;
 
+// Default 1: frame animations on the skinned vertices instead of the component bounds. Component bounds come from the
+// physics asset / reference pose and can be far larger than what is visible (first-person arms: root at the floor,
+// A-pose arms 140 cm wide), which made the mesh tiny in the tile. Debug toggle only; it is not part of the cache key.
+static int32 GBongTightFraming = 1;
+static FAutoConsoleVariableRef CVarBongTightFraming(
+	TEXT("BongThumbLive.TightFraming"),
+	GBongTightFraming,
+	TEXT("1 = frame animation thumbnails on the skinned mesh vertices (default). 0 = engine component bounds (stock framing). Clear the cache after changing it."));
+
 #include UE_INLINE_GENERATED_CPP_BY_NAME(BongThumbLiveRenderer)
 
 ABongThumbLiveMeshActor::ABongThumbLiveMeshActor(const FObjectInitializer& ObjectInitializer)
@@ -508,7 +519,8 @@ public:
 
 					if (!(bPlayable && bStableFraming))
 					{
-						FramingBounds = Comp->Bounds;
+						FBox Skinned;
+						FramingBounds = GetSkinnedBox(Skinned) ? FBoxSphereBounds(Skinned) : Comp->Bounds;
 					}
 
 					const float BoundsZOffset = GetBoundsZOffset(FramingBounds);
@@ -601,7 +613,8 @@ private:
 			const float T = (Length > UE_KINDA_SMALL_NUMBER) ? Length * (float(i) / float(NumSamples - 1)) : 0.f;
 			PoseAt(Anim, FMath::Min(T, FMath::Max(0.f, Length - UE_KINDA_SMALL_NUMBER)));
 			Comp->UpdateBounds();
-			Box += Comp->Bounds.GetBox();
+			FBox Skinned;
+			Box += GetSkinnedBox(Skinned) ? Skinned : Comp->Bounds.GetBox();
 		}
 		const FBoxSphereBounds Result = Box.IsValid ? FBoxSphereBounds(Box) : Comp->Bounds;
 		if (BongAnythingCompiling())
@@ -615,6 +628,65 @@ private:
 		}
 		BoundsCache.Add(Key, Result);
 		return Result;
+	}
+
+	/** World-space box of the CPU-skinned LOD0 vertices in the current pose (editor imported model). False if unavailable. */
+	bool GetSkinnedBox(FBox& OutBox) const
+	{
+		OutBox = FBox(ForceInit);
+		if (!GBongTightFraming)
+		{
+			return false;
+		}
+		const USkeletalMeshComponent* Comp = PreviewActor->GetSkeletalMeshComponent();
+		const USkeletalMesh* Mesh = Comp->GetSkeletalMeshAsset();
+		const FSkeletalMeshModel* Model = Mesh ? Mesh->GetImportedModel() : nullptr;
+		if (!Model || Model->LODModels.Num() == 0)
+		{
+			return false;
+		}
+		const FSkeletalMeshLODModel& LOD = Model->LODModels[0];
+		TArray<FMatrix44f> RefToLocals;
+		Comp->CacheRefToLocalMatrices(RefToLocals);
+		if (RefToLocals.Num() == 0)
+		{
+			return false;
+		}
+		const int32 Stride = FMath::Max(1, static_cast<int32>(LOD.NumVertices) / 40000); // cap the work on huge meshes
+		const FTransform& ToWorld = Comp->GetComponentTransform();
+		for (const FSkelMeshSection& Section : LOD.Sections)
+		{
+			if (Section.bDisabled)
+			{
+				continue;
+			}
+			for (int32 V = 0; V < Section.SoftVertices.Num(); V += Stride)
+			{
+				const FSoftSkinVertex& Vertex = Section.SoftVertices[V];
+				FVector3f Pos(0.f);
+				float WeightSum = 0.f;
+				for (int32 I = 0; I < MAX_TOTAL_INFLUENCES; ++I)
+				{
+					const float W = Vertex.InfluenceWeights[I];
+					if (W <= 0.f || !Section.BoneMap.IsValidIndex(Vertex.InfluenceBones[I]))
+					{
+						continue;
+					}
+					const int32 Bone = Section.BoneMap[Vertex.InfluenceBones[I]];
+					if (!RefToLocals.IsValidIndex(Bone))
+					{
+						continue;
+					}
+					Pos += RefToLocals[Bone].TransformPosition(Vertex.Position) * W;
+					WeightSum += W;
+				}
+				if (WeightSum > 0.f)
+				{
+					OutBox += ToWorld.TransformPosition(FVector(Pos / WeightSum));
+				}
+			}
+		}
+		return OutBox.IsValid != 0;
 	}
 
 	ABongThumbLiveMeshActor* PreviewActor = nullptr;

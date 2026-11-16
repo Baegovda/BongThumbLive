@@ -51,7 +51,7 @@ namespace BongCacheConst
 	static constexpr uint32 Magic = 0x434C5442; // "BTLC"
 	static constexpr int32 FileVersion = 1;
 	/** Bump when the rendering changes in a way that makes old cached pictures wrong. */
-	static constexpr int32 KeyVersion = 2; // corrected sampling for clips whose effective cache FPS is below one
+	static constexpr int32 KeyVersion = 3; // 2: sub-1-FPS sampling fix; 3: framing on skinned vertices (BongThumbLive.TightFraming)
 	static constexpr int32 MaxConcurrentLoads = 4;
 	static constexpr int32 MaxUploadsPerTick = 2;
 	static const TCHAR* IndexFileName = TEXT("index.txt");
