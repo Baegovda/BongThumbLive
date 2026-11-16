@@ -24,6 +24,9 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## v2.2.1 released (2026-11-16 ~16:00 KST)
+- Tag v2.2.1 = a055d19, https://github.com/Baegovda/BongThumbLive/releases/tag/v2.2.1, asset BongThumbLive-v2.2.1-UE5.8-Win64.zip (from %TEMP%\BongThumbLive_pkg221). Content: ReleaseAfterCoarse default 1 (below). Same code as pkg58n (suite 8/8) plus the version bump; deployed to the engine copy (binaries .bak2 = pkg58n, .bak8 = v2.2; uplugin .bak2 = 2.2).
+
 ## Cold-load speed, folder-click split, cleanup (2026-11-16 15:00-15:50 KST, after v2.2)
 - **ReleaseAfterCoarse default 2 -> 1** (main, after the v2.2 tag; deployed as pkg58n). UE 5.8 cold A/B in the side-monitor test project, 113-anim folder, avg / max new-tile-to-shown: mode 2 4.9-5.3 / ~24 s (4 runs); mode 1 2.00, 1.74, 3.14, 1.64, 1.41 / 4.2-10.4 s (5 runs). Hitches > 100 ms per 145 s: mode 1 1-7, mode 2 2-3. All 113 caches complete at the end in both modes. On 5.7 mode 1 had been rejected for ~150 hitches; on 5.8 it no longer has that cost. Rejected again: `SceneRenderBudgetWaitingMs 12` (3.9 s avg, max ~21 s), `FirstFrameFirst 1` (2.00 / 1.35 s = noise vs mode 1).
 - **Folder-click split** (`Tools/btl_trace_split.py` over BTLT traces, cold plugin cache, warm DDC): almost all latency is the plugin's load queue (slot/throughput wait). First screen median: queue 7.0 s (mode 2) -> 1.9-6.0 s (mode 1, median of runs ~2.4 s); engine async load 0.02-0.04 s, anim data ready 0.02-0.03 s, first-frame render 0.04-0.08 s. Warm plugin cache: folder click -> tile shown avg 0.16-0.22 s, max 0.53-0.88 s (3 runs; one run had an unexplained hitch burst while the plugin was idle, not reproduced).
@@ -95,7 +98,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 
 ## Repo / releases
 - v2.1 released: tag commit 9b3050e. main is at 9a69106 (PR #1 merged 2026-11-15).
-- Do NOT publish a new release unless the user asks. Report readiness for v2.2 instead.
+- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1 (UE 5.8).
 
 ## Build
 - `"K:\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin -Plugin="C:\workspace\BongThumbLive\BongThumbLive.uplugin" -Package=C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_pkgN -TargetPlatforms=Win64 -Rocket`. BuildPlugin builds a HostProject copy, so it works while the editor runs. The repo `.uplugin` EngineVersion should match 5.8 first.
@@ -111,7 +114,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 - Settings UI text stays Korean and beginner-friendly.
 - Every test run starts with an empty plugin disk cache (user request 2026-10-30).
 - Runtime tests run in the background from now on (user request 2026-11-16): do not disturb the user's desktop, but never minimise or hide the test editor. A minimised editor runs at ~3 fps, screenshots fail and the plugin skips Content Browsers in non-visible windows (`visibleViews=0`), so the data would be wrong. Unfocused/covered is fine with `bThrottleCPUWhenNotForeground=False`. Use `Tools/btl_launch_bg.ps1` (user chose the top-left 1080p monitor, DISPLAY1 at X=-1920 Y=-1080): it launches with `-nosplash`, moves the editor windows there with SetWindowPos(NOACTIVATE) within ~0.3 s, un-minimises them, and backs up + restores FilterBar.json, EditorLayout.ini and the project's EditorPerProjectUserSettings.ini. Call it in-process: `& Tools\btl_launch_bg.ps1 -Project <uproject> -EditorArgs '<args>' -LogCopy <log>`. Verified 2026-11-16: window 1920x1032 at -1920,-1080, regression suite 7/7 (50 tile clips, 20 partial; report `%TEMP%\btl_auto58j`). Window-size-dependent numbers (tiles on screen, live counts) from earlier 2262x1798 runs are not comparable with side-monitor runs.
-- Commits: fast-forward only, never force-push. No new release.
+- Commits: fast-forward only, never force-push. Releases: see Repo / releases (no need to ask).
 - Screenshots: `%TEMP%\btl_shots\`; commit small ones to `Docs/` if useful.
 - Update this file after every meaningful step, then commit and push it. The repo copy is the only source of truth.
 
@@ -119,7 +122,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 1. Automation tests on UE 5.8: done (7/7, 2026-11-16). Live tiles in the real UE_VFX_58 checked 2026-11-16 (they move; see "Live check" section). Small framing of first-person anim tiles fixed (TightFraming).
 2. Done 2026-11-16: repo port + pkg58b deployed (rollback = copy the `.bak1` files back).
 3. Tooltips: covered by the KoreanTooltips automation test; a by-eye hover is optional.
-4. v2.2 released 2026-11-16. No further release without a new request.
+4. v2.2 and v2.2.1 released 2026-11-16. Future releases need no confirmation.
 
 ---
 # History (UE 5.7 era; paths below are stale)
