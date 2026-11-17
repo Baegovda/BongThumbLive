@@ -98,4 +98,6 @@ if (-not $p.HasExited) { Write-Host "TIMEOUT: editor pid $($p.Id) still running"
 
 foreach ($f in $saved.Keys) { Copy-Item $saved[$f] $f -Force }
 Write-Host "restored $($saved.Count) per-user file(s) from $backup"
+# Backup rotation: keep the three newest launcher backups.
+Get-ChildItem $env:TEMP -Directory -Filter 'btl_bg_backup_*' | Sort-Object Name -Descending | Select-Object -Skip 3 | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 if ($LogCopy) { Copy-Item (Join-Path $ProjDir "Saved\Logs\$ProjName.log") $LogCopy -Force }

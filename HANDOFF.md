@@ -144,7 +144,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 - Build.bat does not work for the project (KawaiiPhysics plugin location, no C++ target).
 
 ## Standing rules
-- Back up every changed file or binary as `.bakN` next to it. Never overwrite an existing .bakN; use the next free N.
+- Back up every changed file or binary as `.bakN` next to it (N = newest + 1). **Rotate while working** (owner, 2026-11-18: "백업 정리해가면서해"): per file keep the oldest backup (2026-11-15 baseline) and the two newest by file time; `Tools/btl_build_deploy58.ps1` does this after every deploy and keeps the two newest %TEMP% build packages; `btl_launch_bg.ps1` keeps the three newest config backups. Delete old screenshots/logs/report dirs in %TEMP% when a task is done. Every released build stays available as a GitHub release zip.
 - Never delete user assets. Never touch `/Game/SM2_Work/Original/*` or `/Game/Work/*`. Never save Lightning_01.
 - Editor restarts are pre-authorized. Launch with `-AutoDeclinePackageRecovery`. On a crash: close CrashReportClient, read the report, relaunch and resume. Never kill editors you did not start (check CommandLine).
 - Full CPU use is OK (work is top priority).
