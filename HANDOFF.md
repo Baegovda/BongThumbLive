@@ -29,6 +29,7 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Falling-leaf effects (Daisy/Dead/Green/Judas Leaves): 210 CPU particles each, spread ~15 x 24 m, small and dark; tiles still look empty in the Content Browser (calibration often finds < 12 lit pixels, visibility varied between runs). Not solved; FXLightBoost 3 made no clear difference. Next idea if wanted: frame on particle positions (CPU emitters) instead of pixels.
 - New: `BongThumbLive.FXDebug` prints per-emitter sim target/state/particle count; CVar `BongThumbLive.FXLightBoost` (default 1).
 - Suite 8/8 (BTL_Niagara 572 lit, PS_MuzzleSmoke 51). Released v2.3.1, deployed to the engine copy.
+- Cleanup 2026-11-18: deleted 24 temp packages (1.9 GB; kept %TEMP%\BongThumbLive_pkg231 = v2.3.1), old release staging/launcher backups, FX debug shots, the FX folders copied into BTLTest58 (168 MB). Engine-copy backups now: .bak1 = 2026-11-15 build/source, binaries .bak8 = v2.2 release build, uplugin .bak5 = 2.3.0. The v2.2.1-v2.3.0 binary backups were removed by the cleanup; to roll back to those, use the GitHub release zips (every version is attached there).
 
 ## v2.3.0: Niagara/Cascade framing + 5.8 live-effect fixes (2026-11-18 ~01:20 KST)
 - Owner request (2026-11-17): Niagara thumbnails framed to fill the square. Released as v2.3.0, deployed to the engine copy (binaries .bak5 = v2.2.2 build; engine .uplugin .bak4 = 2.2.2).
