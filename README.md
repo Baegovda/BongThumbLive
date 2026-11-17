@@ -1,6 +1,6 @@
 > **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
-# BongThumbLive 2.3.4 (Unreal Engine 5.8 editor plugin)
+# BongThumbLive 2.3.5 (Unreal Engine 5.8 editor plugin)
 
 Live, looping Content Browser thumbnails:
 
@@ -9,6 +9,9 @@ Live, looping Content Browser thumbnails:
 | Animation Sequence / Montage / Composite | the clip plays in a loop on its preview mesh |
 | Material / Material Instance | Time / Panner / Sine driven nodes animate |
 | Niagara System, Cascade Particle System | the effect is simulated in a small preview world |
+
+## What's new in 2.3.5
+- **One-shot effects no longer sit empty.** Many burst effects leave nothing on screen for seconds before the system finishes, so their tiles looked empty most of the time. A Niagara effect that has shown particles in this loop now restarts after 0.5 s with none (`BongThumbLive.FXSkipIdle`, default 1; `idleRestarts` in Status).
 
 ## What's new in 2.3.4
 - **Crash fix (UE 5.8 Substrate).** Opening some effect folders crashed the editor ("CurrentMaxBytesPerPixel (28) exceeds PlatformSettingsBytesPerPixel (20)") as soon as their effects were drawn live; saved effect thumbnails had never drawn those materials. The plugin now renders its effect tiles with `r.Substrate.AllocationMode 2` (switched only around its own renders; other views keep your setting). `BongThumbLive.FXSafeSubstrate 0` turns this off.

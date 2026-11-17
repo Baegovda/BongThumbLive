@@ -24,6 +24,11 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## v2.3.5: skip idle gaps of one-shot effects (2026-11-18 ~06:10 KST)
+- `Simulate` restarts a Niagara effect after 0.5 s with zero particles (sum of `GetNumParticles` over non-complete emitters) once the loop has shown particles (`bHadParticlesThisLoop`); CVar `BongThumbLive.FXSkipIdle` (1), Status `idleRestarts=`. Survey (UE_VFX_58): DeathEffects_Vol2 Skull/Lightning/Black tiles that were empty at capture now show more often; no regressions in Environment/Base/Slashes; 0 asserts.
+- Tried and removed: framing the middle of a travelling effect's path at 1.6x its biggest sample (MagicalSlashes blades are long thin streaks and did not grow; NS_Fire_Torch lost its flame to the frame edge). Union framing kept. DeathEffects_Vol2/StaticMesh effects mostly dissolve a mesh given by a user parameter, so many draw little in a thumbnail scene.
+- Suite 8/8. Released v2.3.5, deployed to the engine copy.
+
 ## v2.3.4: Substrate crash fix (2026-11-18 ~05:40 KST)
 - **Crash:** opening /Game/VFX/Base/Particle (258 Niagara systems) in UE_VFX_58 with live effect tiles crashed the editor: `Assertion failed: CurrentMaxBytesPerPixel <= PlatformSettingsBytesPerPixel` (Substrate.cpp:566, "(28) exceeds (20)"). Project: `r.Substrate=True`, `r.Substrate.ProjectGBufferFormat=1`, `r.Substrate.BytesPerPixel=256`; the platform budget the renderer uses is 20. Saved Niagara thumbnails never drew these materials, so the owner never hit it; v2.3.0+ live tiles did. FXTrace showed every used material at <= 20 bytes (shader maps still compiling); the last render before the assert was NS_BeamEnergyFragments; the 28-byte source was not identified.
 - **Fix:** `FSafeSubstrateScope` sets `r.Substrate.AllocationMode 2` (buffer sized from the platform budget, the check cannot fire; oversized materials are clamped like non-editor builds) around the plugin's FX renders (tile render and calibration) and restores it right after; the cvar's render-thread copy updates in command order. CVar `BongThumbLive.FXSafeSubstrate` (1). Verified: same folder, 0 asserts, 27 live scenes framed. Also kept: per-material Substrate budget check (`substrateSkips`), `BongThumbLive.FXWaitForShaders` (default 0: on-demand shaders never report complete, so waiting made nothing live), `BongThumbLive.FXTrace`.
@@ -142,7 +147,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 
 ## Repo / releases
 - v2.1 released: tag commit 9b3050e. main is at 9a69106 (PR #1 merged 2026-11-15).
-- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2, v2.3.0, v2.3.1, v2.3.2, v2.3.3, v2.3.4 (UE 5.8).
+- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2, v2.3.0, v2.3.1, v2.3.2, v2.3.3, v2.3.4, v2.3.5 (UE 5.8).
 
 ## Build
 - `"K:\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin -Plugin="C:\workspace\BongThumbLive\BongThumbLive.uplugin" -Package=C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_pkgN -TargetPlatforms=Win64 -Rocket`. BuildPlugin builds a HostProject copy, so it works while the editor runs. The repo `.uplugin` EngineVersion should match 5.8 first.

@@ -110,6 +110,10 @@ namespace BongThumbLiveFX
 			}
 		}
 	};
+	static int32 GSkipIdle = 1;
+	static FAutoConsoleVariableRef CVarSkipIdle(TEXT("BongThumbLive.FXSkipIdle"), GSkipIdle,
+		TEXT("1 = restart a Niagara effect after 0.5 s without particles once it has shown some (one-shot effects no longer sit empty; default)."));
+	static int64 GIdleRestarts = 0;
 	static int32 GTrace = 0;
 	static FAutoConsoleVariableRef CVarTrace(TEXT("BongThumbLive.FXTrace"), GTrace,
 		TEXT("Debug: 1 = log every live effect render and its materials' Substrate size (find assets that crash the renderer)."));
@@ -299,6 +303,29 @@ public:
 			PSC->ActivateSystem();
 		}
 		Age = 0.0;
+		bHadParticlesThisLoop = false;
+		IdleSince = -1.0;
+	}
+
+	/** Live particles of a Niagara effect (all emitters, CPU and GPU counts as reported); -1 if unknown (Cascade). */
+	int32 GetNiagaraParticleCount() const
+	{
+		const UNiagaraComponent* NC = Cast<UNiagaraComponent>(Component.Get());
+		if (!NC || !NC->GetSystemInstanceController().IsValid())
+		{
+			return -1;
+		}
+		const FNiagaraSystemInstance* SI = NC->GetSystemInstanceController()->GetSystemInstance_Unsafe();
+		if (!SI)
+		{
+			return -1;
+		}
+		int32 Count = 0;
+		for (const FNiagaraEmitterInstanceRef& E : SI->GetEmitters())
+		{
+			Count += E->IsComplete() ? 0 : E->GetNumParticles();
+		}
+		return Count;
 	}
 
 	bool IsFinished() const
@@ -353,8 +380,26 @@ public:
 			}
 			Age += Step;
 			TotalSimTime += Step;
-			if (IsFinished() || (MaxLoop > 0.0 && Age >= MaxLoop))
+			// One-shot effects often stay empty for a long time after their burst before the system completes, so the
+			// tile looked empty most of the time. Once this loop has shown particles, 0.5 s with none restarts it.
+			bool bIdle = false;
+			if (BongThumbLiveFX::GSkipIdle)
 			{
+				const int32 Particles = GetNiagaraParticleCount();
+				if (Particles > 0)
+				{
+					bHadParticlesThisLoop = true;
+					IdleSince = -1.0;
+				}
+				else if (Particles == 0 && bHadParticlesThisLoop)
+				{
+					if (IdleSince < 0.0) { IdleSince = Age; }
+					bIdle = Age - IdleSince >= 0.5;
+				}
+			}
+			if (IsFinished() || bIdle || (MaxLoop > 0.0 && Age >= MaxLoop))
+			{
+				if (bIdle) { ++BongThumbLiveFX::GIdleRestarts; }
 				Restart();
 			}
 		}
@@ -417,6 +462,9 @@ public:
 		{
 			// Fitted on the covered pixels: the union rectangle (camera right/up plane) fills GAutoFrameFill of the view.
 			Center = FitRight * (0.5 * (FitMin.X + FitMax.X)) + FitUp * (0.5 * (FitMin.Y + FitMax.Y)) + FitDir * FitDepth;
+			// (Tried 2026-11-18: framing the middle of a travelling effect's path at 1.6x its biggest single sample. Blade
+			// slashes are long thin streaks, so they did not get bigger, and a torch with falling sparks lost its flame
+			// to the frame edge. The union of all samples is kept.)
 			const double Half = 0.5 * FMath::Max(FitMax.X - FitMin.X, FitMax.Y - FitMin.Y);
 			Zoom = Half / (FMath::Tan(HalfFOV) * FMath::Clamp((double)BongThumbLiveFX::GAutoFrameFill, 0.5, 1.0));
 		}
@@ -500,6 +548,8 @@ public:
 	FBox FramingBox = FBox(ForceInit);
 	double Age = 0.0;
 	double TotalSimTime = 0.0; // never reset (auto-frame sampling schedule)
+	bool bHadParticlesThisLoop = false;
+	double IdleSince = -1.0;
 	float AppliedLightBoost = 1.0f;
 	double LastSimTime = 0.0;
 	double LastDrawTime = 0.0;
@@ -1155,8 +1205,8 @@ void UBongThumbLiveFXRenderer::LogScenes() const
 FString UBongThumbLiveFXRenderer::GetFramingStats()
 {
 	using namespace BongThumbLiveFX;
-	return FString::Printf(TEXT("fxFraming: auto=%d samples=%lld renders=%lld empty=%lld avg=%.2f ms max=%.2f ms niagaraCompilePolls=%lld directAdvances=%lld particleFits=%lld particleRejects=%lld substrateSkips=%lld"), GAutoFrame, GCalibSamples, GCalibRenders,
-		GCalibEmpty, GCalibSamples ? GCalibMsTotal / GCalibSamples : 0.0, GCalibMsMax, GCompilePolls, GDirectAdvances, GParticleFits, GParticleRejects, GSubstrateSkips);
+	return FString::Printf(TEXT("fxFraming: auto=%d samples=%lld renders=%lld empty=%lld avg=%.2f ms max=%.2f ms niagaraCompilePolls=%lld directAdvances=%lld particleFits=%lld particleRejects=%lld substrateSkips=%lld idleRestarts=%lld"), GAutoFrame, GCalibSamples, GCalibRenders,
+		GCalibEmpty, GCalibSamples ? GCalibMsTotal / GCalibSamples : 0.0, GCalibMsMax, GCompilePolls, GDirectAdvances, GParticleFits, GParticleRejects, GSubstrateSkips, GIdleRestarts);
 }
 
 void UBongThumbLiveFXRenderer::PruneScenes(double IdleSeconds, int32 MaxScenes)

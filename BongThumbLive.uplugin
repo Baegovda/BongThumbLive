@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
-	"Version": 11,
-	"VersionName": "2.3.4",
+	"Version": 12,
+	"VersionName": "2.3.5",
 	"FriendlyName": "BongThumbLive",
 	"Description": "Live looping Content Browser thumbnails: Animation Sequences/Montages play, time-driven Materials animate, Niagara and Cascade particle systems simulate. Settings: Project Settings > Plugins > Bong Thumb Live.",
 	"Category": "Editor",
