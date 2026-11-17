@@ -3,6 +3,9 @@
 #include "BongThumbLiveSettings.h"
 
 #include "CanvasTypes.h"
+#include "MaterialShared.h"
+#include "Materials/MaterialInterface.h"
+#include "RenderUtils.h"
 #include "ClearQuad.h"
 #include "RHICommandList.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -69,12 +72,53 @@ namespace BongThumbLiveFX
 	static float GLightBoost = 1.0f;
 	static FAutoConsoleVariableRef CVarLightBoost(TEXT("BongThumbLive.FXLightBoost"), GLightBoost,
 		TEXT("Multiplier for the key and sky light of live effect scenes (lit particles such as dark leaves; default 1 = engine thumbnail lighting)."));
+	static int32 GWaitForShaders = 0;
+	static FAutoConsoleVariableRef CVarWaitForShaders(TEXT("BongThumbLive.FXWaitForShaders"), GWaitForShaders,
+		TEXT("1 = with Substrate, draw an effect live only after all its materials finished compiling (on-demand shaders may never finish; default 0)."));
+	// UE 5.8 Substrate asserts (fatal in the editor) when a view needs more material bytes per pixel than the platform
+	// budget ("CurrentMaxBytesPerPixel (28) exceeds PlatformSettingsBytesPerPixel (20)"), which effects in
+	// /Game/VFX/Base/Particle triggered as soon as they were drawn live. With r.Substrate.AllocationMode 2 the buffer is
+	// sized from the platform budget and the check cannot fire (oversized materials are clamped, as in non-editor builds).
+	// The mode is switched only around the plugin's own effect renders; the cvar's render-thread copy updates in command
+	// order, so other views keep the user's setting.
+	static int32 GSafeSubstrate = 1;
+	static FAutoConsoleVariableRef CVarSafeSubstrate(TEXT("BongThumbLive.FXSafeSubstrate"), GSafeSubstrate,
+		TEXT("1 = render live effect tiles with r.Substrate.AllocationMode 2 (avoids a UE 5.8 Substrate assert/crash; default)."));
+	struct FSafeSubstrateScope
+	{
+		IConsoleVariable* Var = nullptr;
+		int32 Previous = 0;
+		FSafeSubstrateScope()
+		{
+			if (!GSafeSubstrate || !Substrate::IsSubstrateEnabled())
+			{
+				return;
+			}
+			static IConsoleVariable* Mode = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Substrate.AllocationMode"));
+			if (Mode && Mode->GetInt() != 2)
+			{
+				Var = Mode;
+				Previous = Mode->GetInt();
+				Var->Set(2, ECVF_SetByCode);
+			}
+		}
+		~FSafeSubstrateScope()
+		{
+			if (Var)
+			{
+				Var->Set(Previous, ECVF_SetByCode);
+			}
+		}
+	};
+	static int32 GTrace = 0;
+	static FAutoConsoleVariableRef CVarTrace(TEXT("BongThumbLive.FXTrace"), GTrace,
+		TEXT("Debug: 1 = log every live effect render and its materials' Substrate size (find assets that crash the renderer)."));
 	static constexpr int32 CalibSize = 256;
 	static constexpr int32 MaxCalibSamples = 40;     // samples over the first ~4 s of simulation: short flashes (slashes)
 	static constexpr double CalibInterval = 0.1;     // simulated seconds between samples
 	static constexpr int32 MaxCalibPerFrame = 1;     // refinement samples per engine frame, all effects together
 	static constexpr int32 MaxFirstCalibPerFrame = 3; // first samples (no fit yet) per engine frame
-	static int64 GCalibRenders = 0, GCalibSamples = 0, GCalibEmpty = 0, GCompilePolls = 0, GDirectAdvances = 0, GParticleFits = 0, GParticleRejects = 0;
+	static int64 GCalibRenders = 0, GCalibSamples = 0, GCalibEmpty = 0, GCompilePolls = 0, GDirectAdvances = 0, GParticleFits = 0, GParticleRejects = 0, GSubstrateSkips = 0;
 	static double GCalibMsTotal = 0.0, GCalibMsMax = 0.0;
 }
 
@@ -193,6 +237,53 @@ public:
 	}
 
 	bool IsValidScene() const { return Component.IsValid() && Asset.IsValid(); }
+
+	/**
+	 * UE 5.8 Substrate: a material compiled for more bytes per pixel than the platform budget makes the renderer assert
+	 * ("CurrentMaxBytesPerPixel (28) exceeds PlatformSettingsBytesPerPixel (20)", fatal in the editor) as soon as it is
+	 * drawn, e.g. effects in /Game/VFX/Base/Particle. Saved effect thumbnails never drew those materials; live tiles would.
+	 * Returns the first material over budget (or closure count over the limit), else null. Unknown (still compiling)
+	 * shader maps count as safe: the renderer uses the default material for them.
+	 */
+	const UMaterialInterface* FindSubstrateOverBudgetMaterial(FString& OutWhy, bool& bOutAllKnown) const
+	{
+		bOutAllKnown = true;
+		UFXSystemComponent* C = Component.Get();
+		if (!C || !Substrate::IsSubstrateEnabled())
+		{
+			return nullptr;
+		}
+		const EShaderPlatform Platform = GMaxRHIShaderPlatform;
+		const uint32 BudgetBytes = Substrate::GetBytePerPixel(Platform);
+		const uint32 BudgetClosures = Substrate::GetClosurePerPixel(Platform, Substrate::IgnoreMaterialQualityLevelsForClosurePerPixel);
+		TArray<UMaterialInterface*> Materials;
+		C->GetUsedMaterials(Materials);
+		for (const UMaterialInterface* M : Materials)
+		{
+			const FMaterialResource* R = M ? M->GetMaterialResource(Platform) : nullptr;
+			const FMaterialShaderMap* Map = R ? R->GetGameThreadShaderMap() : nullptr;
+			if (!Map)
+			{
+				bOutAllKnown = false; // no shader map yet: the renderer draws the default material meanwhile
+				continue;
+			}
+			// An incomplete (still compiling) map already carries the Substrate layout the renderer will use.
+			bOutAllKnown &= R->IsGameThreadShaderMapComplete();
+			const uint32 Bytes = (uint32)Map->GetSubstrateMaterialCompilationOutput().SubstrateUintPerPixel * 4u;
+			const uint32 Closures = Map->GetSubstrateMaterialCompilationOutput().SubstrateClosureCount;
+			if (BongThumbLiveFX::GTrace)
+			{
+				UE_LOG(LogBongThumbLive, Display, TEXT("FXTrace   material %s: %u bytes/pixel (budget %u), %u closures (limit %u), complete=%d"),
+					*M->GetPathName(), Bytes, BudgetBytes, Closures, BudgetClosures, R->IsGameThreadShaderMapComplete() ? 1 : 0);
+			}
+			if (Bytes > BudgetBytes || Closures > BudgetClosures)
+			{
+				OutWhy = FString::Printf(TEXT("%u bytes/pixel (budget %u), %u closures (limit %u)"), Bytes, BudgetBytes, Closures, BudgetClosures);
+				return M;
+			}
+		}
+		return nullptr;
+	}
 
 	void Restart()
 	{
@@ -355,6 +446,8 @@ public:
 	double NextCalibTime = 0.0;
 	bool bParticleFit = false; // framing follows CPU particle positions (scattered effects)
 	uint64 CreatedFrame = 0;   // GFrameCounter when created (nothing renders in that frame)
+	bool bSubstrateUnsafe = false;   // uses a material over the Substrate budget: never rendered live (stock thumbnail)
+	bool bSubstrateVerified = false; // every material's shader map was checked and is within budget
 
 	/** World positions of all live particles of CPU Niagara emitters. False if the effect has no CPU particles. */
 	bool GetCpuParticlePositions(TArray<FVector>& Out) const
@@ -562,6 +655,34 @@ void UBongThumbLiveFXRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Wi
 		Scene->CreatedFrame = GFrameCounter;
 	}
 	FBongThumbLiveFXScene* S = Scene; // the map may rehash in PruneScenes below
+	if (!S->bSubstrateUnsafe && !S->bSubstrateVerified)
+	{
+		// Checked on every draw until all shader maps are known (a map finishing compilation between two checks would be
+		// drawn once and crash), then never again.
+		FString Why;
+		bool bAllKnown = false;
+		const UMaterialInterface* Bad = S->FindSubstrateOverBudgetMaterial(Why, bAllKnown);
+		S->bSubstrateVerified = !Bad && bAllKnown;
+		if (Bad)
+		{
+			S->bSubstrateUnsafe = true;
+			++BongThumbLiveFX::GSubstrateSkips;
+			UE_LOG(LogBongThumbLive, Warning, TEXT("%s: not drawn live - material %s needs %s; drawing it would crash the UE 5.8 Substrate renderer. Showing the saved thumbnail."),
+				*Object->GetName(), *Bad->GetPathName(), *Why);
+		}
+	}
+	// Until every material's shader map has finished compiling and was checked, do not draw the effect live: the
+	// renderer crashed on effects whose (still compiling) maps reported a size within budget (measured: all materials
+	// of NS_BeamEnergyFragments <= 20 bytes while compiling, the view then needed 28).
+	if (S->bSubstrateUnsafe || (BongThumbLiveFX::GWaitForShaders && Substrate::IsSubstrateEnabled() && !S->bSubstrateVerified))
+	{
+		S->LastDrawTime = Now;
+		if (UThumbnailRenderer* R = GetInner(Object))
+		{
+			R->Draw(Object, X, Y, Width, Height, RenderTarget, Canvas, bAdditionalViewFamily);
+		}
+		return;
+	}
 
 	const double Rate = (double)FMath::Clamp(Settings->PlaybackRate, 0.05f, 10.f);
 	const double MaxLoop = (double)FMath::Max(0.f, Settings->FXMaxLoopSeconds);
@@ -618,6 +739,12 @@ void UBongThumbLiveFXRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Wi
 		return;
 	}
 
+	if (BongThumbLiveFX::GTrace)
+	{
+		UE_LOG(LogBongThumbLive, Display, TEXT("FXTrace render %s"), *Object->GetPathName());
+		GLog->Flush();
+	}
+	BongThumbLiveFX::FSafeSubstrateScope SafeSubstrate;
 	FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(RenderTarget, S->GetScene(), FEngineShowFlags(ESFIM_Game))
 		.SetTime(UThumbnailRenderer::GetTime())
 		.SetAdditionalViewFamily(bAdditionalViewFamily));
@@ -821,7 +948,15 @@ void UBongThumbLiveFXRenderer::CalibrateFraming(FBongThumbLiveFXScene* S)
 		Right = View->GetViewRight();
 		Up = View->GetViewUp();
 		Dir = View->GetViewDirection();
-		RenderViewFamily(&Canvas, &Family, View);
+		if (GTrace)
+		{
+			UE_LOG(LogBongThumbLive, Display, TEXT("FXTrace calibrate %s"), S->Asset.IsValid() ? *S->Asset->GetPathName() : TEXT("?"));
+			GLog->Flush();
+		}
+		{
+			FSafeSubstrateScope SafeSubstrate;
+			RenderViewFamily(&Canvas, &Family, View);
+		}
 		Canvas.Flush_GameThread();
 		TArray<FColor> Pixels;
 		const bool bRead = Resource->ReadPixels(Pixels) && Pixels.Num() == CalibSize * CalibSize;
@@ -1020,8 +1155,8 @@ void UBongThumbLiveFXRenderer::LogScenes() const
 FString UBongThumbLiveFXRenderer::GetFramingStats()
 {
 	using namespace BongThumbLiveFX;
-	return FString::Printf(TEXT("fxFraming: auto=%d samples=%lld renders=%lld empty=%lld avg=%.2f ms max=%.2f ms niagaraCompilePolls=%lld directAdvances=%lld particleFits=%lld particleRejects=%lld"), GAutoFrame, GCalibSamples, GCalibRenders,
-		GCalibEmpty, GCalibSamples ? GCalibMsTotal / GCalibSamples : 0.0, GCalibMsMax, GCompilePolls, GDirectAdvances, GParticleFits, GParticleRejects);
+	return FString::Printf(TEXT("fxFraming: auto=%d samples=%lld renders=%lld empty=%lld avg=%.2f ms max=%.2f ms niagaraCompilePolls=%lld directAdvances=%lld particleFits=%lld particleRejects=%lld substrateSkips=%lld"), GAutoFrame, GCalibSamples, GCalibRenders,
+		GCalibEmpty, GCalibSamples ? GCalibMsTotal / GCalibSamples : 0.0, GCalibMsMax, GCompilePolls, GDirectAdvances, GParticleFits, GParticleRejects, GSubstrateSkips);
 }
 
 void UBongThumbLiveFXRenderer::PruneScenes(double IdleSeconds, int32 MaxScenes)
