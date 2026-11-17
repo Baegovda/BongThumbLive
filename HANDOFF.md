@@ -24,6 +24,10 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## v2.3.2: leaves via particle positions (2026-11-18 ~02:50 KST)
+- When the pixel calibration finds nothing (< 12 lit) or a scattered effect (biggest blob < 25%), `CalibrateFraming` uses CPU particle positions (`FNiagaraDataSetAccessor<FNiagaraPosition>` on each CPU emitter's `GetParticleData()`, after `WaitForConcurrentTickDoNotFinalize`; local-space emitters transformed by the component): window around the per-axis median, half-size = Chebyshev distance of the K-th nearest particle (K = n/8 clamped 8..40) x1.15. Once an effect uses this (`bParticleFit`), later samples skip the render. Status: `particleFits=`.
+- Verified in UE_VFX_58 (Environment_VFX_Pack): Daisy/Dead/Green/Judas/Sakura leaves now show leaves in their tiles; clouds, snow, fire torch, magic sparks/torch, lightning unchanged. Rain/Dust grains stay faint (GPU or very small). Suite 8/8.
+
 ## v2.3.1 (2026-11-18 ~02:00 KST)
 - `CoveredRect` is blob-based: lit pixels (>32) are flood-filled into blobs (neighbours within 3 px); the biggest blobs are taken until 80% of lit pixels are inside. If the biggest blob has < 25% of the lit pixels (scattered: snow, rain, leaves), the 25th..75th percentile per axis is framed instead. Result in UE_VFX_58: NS_Fire_Torch (sparks fall 25 m) now shows its flame filling the tile; Magic_Sparks/Magic_Torch/lightning large; clouds/snow/slashes unchanged (good).
 - Falling-leaf effects (Daisy/Dead/Green/Judas Leaves): 210 CPU particles each, spread ~15 x 24 m, small and dark; tiles still look empty in the Content Browser (calibration often finds < 12 lit pixels, visibility varied between runs). Not solved; FXLightBoost 3 made no clear difference. Next idea if wanted: frame on particle positions (CPU emitters) instead of pixels.
@@ -125,7 +129,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 
 ## Repo / releases
 - v2.1 released: tag commit 9b3050e. main is at 9a69106 (PR #1 merged 2026-11-15).
-- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2, v2.3.0, v2.3.1 (UE 5.8).
+- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2, v2.3.0, v2.3.1, v2.3.2 (UE 5.8).
 
 ## Build
 - `"K:\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin -Plugin="C:\workspace\BongThumbLive\BongThumbLive.uplugin" -Package=C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_pkgN -TargetPlatforms=Win64 -Rocket`. BuildPlugin builds a HostProject copy, so it works while the editor runs. The repo `.uplugin` EngineVersion should match 5.8 first.

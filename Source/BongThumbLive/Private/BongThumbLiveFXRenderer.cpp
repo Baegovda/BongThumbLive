@@ -15,6 +15,10 @@
 #include "NiagaraSystemInstance.h"
 #include "NiagaraSystemInstanceController.h"
 #include "NiagaraEmitterInstance.h"
+#include "NiagaraDataSet.h"
+#include "NiagaraDataSetAccessor.h"
+#include "NiagaraEmitter.h"
+#include "NiagaraEmitterHandle.h"
 #include "Particles/ParticleSystem.h"
 #include "Particles/ParticleSystemComponent.h"
 #include "RenderingThread.h"
@@ -69,7 +73,7 @@ namespace BongThumbLiveFX
 	static constexpr int32 MaxCalibSamples = 40;     // samples over the first ~4 s of simulation: short flashes (slashes)
 	static constexpr double CalibInterval = 0.1;     // simulated seconds between samples
 	static constexpr int32 MaxCalibPerFrame = 2;     // calibration samples per engine frame, all effects together
-	static int64 GCalibRenders = 0, GCalibSamples = 0, GCalibEmpty = 0, GCompilePolls = 0, GDirectAdvances = 0;
+	static int64 GCalibRenders = 0, GCalibSamples = 0, GCalibEmpty = 0, GCompilePolls = 0, GDirectAdvances = 0, GParticleFits = 0;
 	static double GCalibMsTotal = 0.0, GCalibMsMax = 0.0;
 }
 
@@ -348,6 +352,53 @@ public:
 	double FitDepth = 0.0;
 	int32 CalibSamples = 0;
 	double NextCalibTime = 0.0;
+	bool bParticleFit = false; // framing follows CPU particle positions (scattered effects)
+
+	/** World positions of all live particles of CPU Niagara emitters. False if the effect has no CPU particles. */
+	bool GetCpuParticlePositions(TArray<FVector>& Out) const
+	{
+		Out.Reset();
+		const UNiagaraComponent* NC = Cast<UNiagaraComponent>(Component.Get());
+		if (!NC || !NC->GetSystemInstanceController().IsValid())
+		{
+			return false;
+		}
+		FNiagaraSystemInstance* SI = NC->GetSystemInstanceController()->GetSystemInstance_Unsafe();
+		if (!SI)
+		{
+			return false;
+		}
+		SI->WaitForConcurrentTickDoNotFinalize(); // particle buffers are stable only between ticks
+		const FTransform ToWorld = NC->GetComponentTransform();
+		static const FName PositionName(TEXT("Position"));
+		for (const FNiagaraEmitterInstanceRef& E : SI->GetEmitters())
+		{
+			if (E->GetSimTarget() != ENiagaraSimTarget::CPUSim || E->IsComplete())
+			{
+				continue;
+			}
+			const FNiagaraDataSet& Data = E->GetParticleData();
+			const FNiagaraDataBuffer* Buffer = Data.GetCurrentData();
+			if (!Buffer)
+			{
+				continue;
+			}
+			const int32 Num = (int32)Buffer->GetNumInstances();
+			const FNiagaraDataSetReaderFloat<FNiagaraPosition> Reader = FNiagaraDataSetAccessor<FNiagaraPosition>::CreateReader(Data, PositionName);
+			if (!Reader.IsValid())
+			{
+				continue;
+			}
+			const FVersionedNiagaraEmitterData* EmitterData = E->GetEmitterHandle().GetEmitterData();
+			const bool bLocal = EmitterData && EmitterData->bLocalSpace;
+			for (int32 I = 0; I < Num; ++I)
+			{
+				const FVector P = FVector(Reader.GetSafe(I, FNiagaraPosition(FVector3f::ZeroVector)));
+				Out.Add(bLocal ? ToWorld.TransformPosition(P) : P);
+			}
+		}
+		return Out.Num() > 0;
+	}
 
 	TWeakObjectPtr<UObject> Asset;
 	TWeakObjectPtr<UFXSystemComponent> Component;
@@ -591,7 +642,7 @@ void UBongThumbLiveFXRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Wi
 namespace BongThumbLiveFX
 {
 	/** Covered-pixel rectangle in NDC (-1..1, +Y up). False if nothing was drawn. bTouchesEdge: cut by the view. */
-	static bool CoveredRect(const TArray<FColor>& Pixels, int32 Size, FVector2D& OutMin, FVector2D& OutMax, bool& bTouchesEdge)
+	static bool CoveredRect(const TArray<FColor>& Pixels, int32 Size, FVector2D& OutMin, FVector2D& OutMax, bool& bTouchesEdge, bool* bOutScattered = nullptr)
 	{
 		// Lit pixels (above the dither/grain noise of an empty view, measured up to ~13) grouped into blobs (8-neighbour,
 		// gaps of up to 2 px bridged). The rectangle covers the biggest blobs until 80% of the lit pixels are inside, so a
@@ -654,6 +705,7 @@ namespace BongThumbLiveFX
 		}
 		Blobs.Sort([](const FBlob& A, const FBlob& B) { return A.Count > B.Count; });
 		const bool bScattered = Blobs[0].Count * 4 < Lit;
+		if (bOutScattered) { *bOutScattered = bScattered; }
 		int32 X0 = Size, Y0 = Size, X1 = -1, Y1 = -1, Inside = 0;
 		if (bScattered)
 		{
@@ -723,7 +775,8 @@ void UBongThumbLiveFXRenderer::CalibrateFraming(FBongThumbLiveFXScene* S)
 	const double TanHalf = FMath::Tan(HalfFOV);
 
 	// One render of the effect alone from (Center, Zoom); returns its covered rectangle in plane units around Center.
-	FVector Right, Up, Dir;
+	FVector Right = S->FitRight, Up = S->FitUp, Dir = S->FitDir;
+	bool bLastScattered = false;
 	auto Measure = [&](const FVector& Center, double Zoom, FVector2D& OutMin, FVector2D& OutMax, bool& bEdge) -> bool
 	{
 		S->bCalibCamera = true;
@@ -754,7 +807,8 @@ void UBongThumbLiveFXRenderer::CalibrateFraming(FBongThumbLiveFXScene* S)
 		const bool bRead = Resource->ReadPixels(Pixels) && Pixels.Num() == CalibSize * CalibSize;
 		++GCalibRenders;
 		FVector2D NdcMin, NdcMax;
-		if (!bRead || !CoveredRect(Pixels, CalibSize, NdcMin, NdcMax, bEdge))
+		bLastScattered = false;
+		if (!bRead || !CoveredRect(Pixels, CalibSize, NdcMin, NdcMax, bEdge, &bLastScattered))
 		{
 			return false;
 		}
@@ -777,9 +831,50 @@ void UBongThumbLiveFXRenderer::CalibrateFraming(FBongThumbLiveFXScene* S)
 		OutCenter = Right * Mid.X + Up * Mid.Y + Dir * Depth;
 		OutZoom = Half / (TanHalf * Share);
 	};
+	// Scattered CPU effects (falling leaves, dust: small particles spread over many metres) draw too few pixels to
+	// measure, or only specks: frame on the particle positions instead, around the median, wide enough to hold the
+	// nearest ~1/8 of the particles (8..40). Once chosen for an effect, later samples skip the render entirely.
+	auto ParticleWindow = [&](FVector2D& OutMin, FVector2D& OutMax) -> bool
+	{
+		TArray<FVector> Positions;
+		if (!S->GetCpuParticlePositions(Positions) || Positions.Num() < 12)
+		{
+			return false;
+		}
+		TArray<double> Xs, Ys;
+		for (const FVector& P : Positions) { Xs.Add(FVector::DotProduct(P, Right)); Ys.Add(FVector::DotProduct(P, Up)); }
+		TArray<double> SX = Xs, SY = Ys;
+		SX.Sort(); SY.Sort();
+		const FVector2D Mid(SX[SX.Num() / 2], SY[SY.Num() / 2]);
+		TArray<double> Dist;
+		for (int32 I = 0; I < Xs.Num(); ++I) { Dist.Add(FMath::Max(FMath::Abs(Xs[I] - Mid.X), FMath::Abs(Ys[I] - Mid.Y))); }
+		Dist.Sort();
+		const int32 K = FMath::Clamp(Dist.Num() / 8, 8, 40);
+		const double Half = FMath::Max(Dist[FMath::Min(K, Dist.Num()) - 1] * 1.15, 5.0);
+		OutMin = Mid - FVector2D(Half);
+		OutMax = Mid + FVector2D(Half);
+		return true;
+	};
 	FVector2D AMin, AMax;
 	bool bEdgeA = false, bA = false;
 	double Depth = 0.0;
+	if (S->bParticleFit && S->bFitValid)
+	{
+		Depth = S->FitDepth;
+		FVector2D PMin, PMax;
+		++S->CalibSamples;
+		++GCalibSamples;
+		if (ParticleWindow(PMin, PMax))
+		{
+			++GParticleFits;
+			S->FitMin = FVector2D(FMath::Min(S->FitMin.X, PMin.X), FMath::Min(S->FitMin.Y, PMin.Y));
+			S->FitMax = FVector2D(FMath::Max(S->FitMax.X, PMax.X), FMath::Max(S->FitMax.Y, PMax.Y));
+		}
+		const double PMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
+		GCalibMsTotal += PMs;
+		GCalibMsMax = FMath::Max(GCalibMsMax, PMs);
+		return;
+	}
 	if (S->bFitValid)
 	{
 		Right = S->FitRight; Up = S->FitUp; Dir = S->FitDir; Depth = S->FitDepth;
@@ -799,6 +894,24 @@ void UBongThumbLiveFXRenderer::CalibrateFraming(FBongThumbLiveFXScene* S)
 	}
 	++S->CalibSamples;
 	++GCalibSamples;
+	if (!S->bFitValid && Depth == 0.0) { Depth = FVector::DotProduct(WideCenter, Dir); }
+	if (!bA || bLastScattered)
+	{
+		FVector2D PMin, PMax;
+		if (ParticleWindow(PMin, PMax))
+		{
+			++GParticleFits;
+			S->bParticleFit = true;
+			S->FitRight = Right; S->FitUp = Up; S->FitDir = Dir; S->FitDepth = Depth;
+			S->FitMin = PMin;
+			S->FitMax = PMax;
+			S->bFitValid = true;
+			const double PMs = (FPlatformTime::Seconds() - StartTime) * 1000.0;
+			GCalibMsTotal += PMs;
+			GCalibMsMax = FMath::Max(GCalibMsMax, PMs);
+			return;
+		}
+	}
 	if (bA)
 	{
 		FVector2D RMin = AMin, RMax = AMax;
@@ -872,8 +985,8 @@ void UBongThumbLiveFXRenderer::LogScenes() const
 FString UBongThumbLiveFXRenderer::GetFramingStats()
 {
 	using namespace BongThumbLiveFX;
-	return FString::Printf(TEXT("fxFraming: auto=%d samples=%lld renders=%lld empty=%lld avg=%.2f ms max=%.2f ms niagaraCompilePolls=%lld directAdvances=%lld"), GAutoFrame, GCalibSamples, GCalibRenders,
-		GCalibEmpty, GCalibSamples ? GCalibMsTotal / GCalibSamples : 0.0, GCalibMsMax, GCompilePolls, GDirectAdvances);
+	return FString::Printf(TEXT("fxFraming: auto=%d samples=%lld renders=%lld empty=%lld avg=%.2f ms max=%.2f ms niagaraCompilePolls=%lld directAdvances=%lld particleFits=%lld"), GAutoFrame, GCalibSamples, GCalibRenders,
+		GCalibEmpty, GCalibSamples ? GCalibMsTotal / GCalibSamples : 0.0, GCalibMsMax, GCompilePolls, GDirectAdvances, GParticleFits);
 }
 
 void UBongThumbLiveFXRenderer::PruneScenes(double IdleSeconds, int32 MaxScenes)
