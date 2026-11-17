@@ -1,6 +1,6 @@
 ﻿# BongThumbLive – HANDOFF (keep this file current)
 
-Last update: 2026-11-16 KST (Asia/Seoul).
+Last update: 2026-11-18 KST (Asia/Seoul). Current release: v2.3.5 (deployed to the engine copy).
 
 ## Current environment (2026-11-16) — READ FIRST
 The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the History sections below is **stale** (those folders no longer exist). Use these instead:
@@ -168,10 +168,10 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 - Update this file after every meaningful step, then commit and push it. The repo copy is the only source of truth.
 
 ## Open items
-1. Automation tests on UE 5.8: done (7/7, 2026-11-16). Live tiles in the real UE_VFX_58 checked 2026-11-16 (they move; see "Live check" section). Small framing of first-person anim tiles fixed (TightFraming).
-2. Done 2026-11-16: repo port + pkg58b deployed (rollback = copy the `.bak1` files back).
-3. Tooltips: covered by the KoreanTooltips automation test; a by-eye hover is optional.
-4. v2.2 and v2.2.1 released 2026-11-16. Future releases need no confirmation.
+Nothing is in progress (2026-11-18, after v2.3.5). Every user request so far is done; the request ledger in the History part below is from the UE 5.7 era and its "todo" marks are stale (items 7-10 and 12 were finished in v2.2-v2.2.2).
+- Known limits, left as is on purpose (see the v2.3.x sections): travelling slashes (MagicalSlashes) stay small because the framing covers their whole path; rain/dust/fog are faint by nature; one-shot effects depend on the capture moment (idle gaps are skipped since v2.3.5); large effect folders show saved thumbnails until the engine has compiled their shaders; DeathEffects_Vol2/StaticMesh effects need a mesh user parameter and draw little.
+- Optional by-eye checks for the owner: hover tooltip on the settings page (covered by the KoreanTooltips test).
+- Rollback: every version is a GitHub release zip; engine-copy `.bakN` files keep the 2026-11-15 baseline and the two newest builds.
 
 ---
 # History (UE 5.7 era; paths below are stale)
