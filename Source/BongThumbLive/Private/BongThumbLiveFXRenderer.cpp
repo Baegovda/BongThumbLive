@@ -14,6 +14,7 @@
 #include "NiagaraSystem.h"
 #include "NiagaraSystemInstance.h"
 #include "NiagaraSystemInstanceController.h"
+#include "NiagaraEmitterInstance.h"
 #include "Particles/ParticleSystem.h"
 #include "Particles/ParticleSystemComponent.h"
 #include "RenderingThread.h"
@@ -61,6 +62,9 @@ namespace BongThumbLiveFX
 	static int32 GOpaqueBackground = 1;
 	static FAutoConsoleVariableRef CVarOpaqueBackground(TEXT("BongThumbLive.FXOpaqueBackground"), GOpaqueBackground,
 		TEXT("1 = live Niagara/Cascade tiles get an opaque (black) background so translucent particles stay visible in the UE 5.8 Content Browser (default)."));
+	static float GLightBoost = 1.0f;
+	static FAutoConsoleVariableRef CVarLightBoost(TEXT("BongThumbLive.FXLightBoost"), GLightBoost,
+		TEXT("Multiplier for the key and sky light of live effect scenes (lit particles such as dark leaves; default 1 = engine thumbnail lighting)."));
 	static constexpr int32 CalibSize = 256;
 	static constexpr int32 MaxCalibSamples = 40;     // samples over the first ~4 s of simulation: short flashes (slashes)
 	static constexpr double CalibInterval = 0.1;     // simulated seconds between samples
@@ -350,6 +354,7 @@ public:
 	FBox FramingBox = FBox(ForceInit);
 	double Age = 0.0;
 	double TotalSimTime = 0.0; // never reset (auto-frame sampling schedule)
+	float AppliedLightBoost = 1.0f;
 	double LastSimTime = 0.0;
 	double LastDrawTime = 0.0;
 	bool bWarmedUp = false;
@@ -519,6 +524,13 @@ void UBongThumbLiveFXRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Wi
 	}
 	S->LastSimTime = Now;
 	S->LastDrawTime = Now;
+	if (S->AppliedLightBoost != BongThumbLiveFX::GLightBoost)
+	{
+		S->AppliedLightBoost = BongThumbLiveFX::GLightBoost;
+		const float Boost = FMath::Clamp(BongThumbLiveFX::GLightBoost, 0.1f, 20.f);
+		S->SetLightBrightness(0.2f * Boost); // FThumbnailPreviewScene's key light intensity
+		S->SetSkyBrightness(1.69f * Boost);  // and its sky light
+	}
 	// Push the simulated particles to the render thread now. Otherwise this happens at the end of the engine frame,
 	// and several draws within one frame (automation, DumpThumb) render particles that were never sent.
 	if (UWorld* World = S->GetWorld())
@@ -581,44 +593,102 @@ namespace BongThumbLiveFX
 	/** Covered-pixel rectangle in NDC (-1..1, +Y up). False if nothing was drawn. bTouchesEdge: cut by the view. */
 	static bool CoveredRect(const TArray<FColor>& Pixels, int32 Size, FVector2D& OutMin, FVector2D& OutMax, bool& bTouchesEdge)
 	{
-		// Per-column / per-row counts of lit pixels; the rectangle spans the 1st..99th percentile of the lit pixels on
-		// each axis, so a few far-flung sparks do not set the framing (measured: a torch whose sparks fly 10x higher
-		// than the flame stayed tiny with a plain bounding box).
-		TArray<int32> Cols, Rows;
-		Cols.SetNumZeroed(Size);
-		Rows.SetNumZeroed(Size);
-		int64 Lit = 0;
+		// Lit pixels (above the dither/grain noise of an empty view, measured up to ~13) grouped into blobs (8-neighbour,
+		// gaps of up to 2 px bridged). The rectangle covers the biggest blobs until 80% of the lit pixels are inside, so a
+		// few far-flung sparks do not set the framing (a torch whose sparks fall 25 m stayed tiny). When no blob holds
+		// 25% (snow, falling leaves: evenly scattered), the middle half of the lit pixels is framed instead.
+		const int32 N = Size * Size;
+		TArray<uint8> LitMask;
+		LitMask.SetNumZeroed(N);
+		int32 Lit = 0;
 		bool bEdge = false;
-		for (int32 Y = 0; Y < Size; ++Y)
+		for (int32 I = 0; I < N; ++I)
 		{
-			const FColor* Row = Pixels.GetData() + (int64)Y * Size;
-			for (int32 X = 0; X < Size; ++X)
+			const FColor C = Pixels[I];
+			if (FMath::Max3(C.R, C.G, C.B) > 32)
 			{
-				const FColor C = Row[X];
-				if (FMath::Max3(C.R, C.G, C.B) > 32) // above the dither/grain noise of an empty view (measured up to ~10-20)
-				{
-					++Cols[X]; ++Rows[Y]; ++Lit;
-					bEdge |= X == 0 || Y == 0 || X == Size - 1 || Y == Size - 1;
-				}
+				LitMask[I] = 1;
+				++Lit;
+				const int32 X = I % Size, Y = I / Size;
+				bEdge |= X == 0 || Y == 0 || X == Size - 1 || Y == Size - 1;
 			}
 		}
 		if (Lit < 12)
 		{
 			return false; // nothing (or a few stray pixels) drawn
 		}
-		auto Percentile = [Lit](const TArray<int32>& Counts, double Fraction)
+		struct FBlob { int32 Count = 0; int32 X0, Y0, X1, Y1; };
+		TArray<FBlob> Blobs;
+		TArray<int32> Label;
+		Label.Init(-1, N);
+		TArray<int32> Stack;
+		constexpr int32 Reach = 3; // neighbours within 3 px (bridges gaps of 2)
+		for (int32 Seed = 0; Seed < N; ++Seed)
 		{
-			const int64 Target = (int64)FMath::FloorToInt64(Fraction * (double)Lit);
-			int64 Sum = 0;
-			for (int32 I = 0; I < Counts.Num(); ++I)
+			if (!LitMask[Seed] || Label[Seed] >= 0) { continue; }
+			FBlob B; B.X0 = B.X1 = Seed % Size; B.Y0 = B.Y1 = Seed / Size;
+			const int32 Id = Blobs.Num();
+			Label[Seed] = Id;
+			Stack.Reset();
+			Stack.Add(Seed);
+			while (Stack.Num())
 			{
-				Sum += Counts[I];
-				if (Sum > Target) { return I; }
+				const int32 P = Stack.Pop(EAllowShrinking::No);
+				const int32 PX = P % Size, PY = P / Size;
+				++B.Count;
+				B.X0 = FMath::Min(B.X0, PX); B.X1 = FMath::Max(B.X1, PX); B.Y0 = FMath::Min(B.Y0, PY); B.Y1 = FMath::Max(B.Y1, PY);
+				for (int32 DY = -Reach; DY <= Reach; ++DY)
+				{
+					const int32 QY = PY + DY;
+					if (QY < 0 || QY >= Size) { continue; }
+					for (int32 DX = -Reach; DX <= Reach; ++DX)
+					{
+						const int32 QX = PX + DX;
+						if (QX < 0 || QX >= Size) { continue; }
+						const int32 Q = QY * Size + QX;
+						if (LitMask[Q] && Label[Q] < 0) { Label[Q] = Id; Stack.Add(Q); }
+					}
+				}
 			}
-			return Counts.Num() - 1;
-		};
-		const int32 X0 = Percentile(Cols, 0.01), X1 = Percentile(Cols, 0.99);
-		const int32 Y0 = Percentile(Rows, 0.01), Y1 = Percentile(Rows, 0.99);
+			Blobs.Add(B);
+		}
+		Blobs.Sort([](const FBlob& A, const FBlob& B) { return A.Count > B.Count; });
+		const bool bScattered = Blobs[0].Count * 4 < Lit;
+		int32 X0 = Size, Y0 = Size, X1 = -1, Y1 = -1, Inside = 0;
+		if (bScattered)
+		{
+			// Evenly scattered (falling leaves, rain, dust over many metres): framing all of it makes each particle a
+			// pixel. Frame the middle half of the lit pixels on each axis so particles are a few pixels big.
+			TArray<int32> Cols, Rows;
+			Cols.SetNumZeroed(Size);
+			Rows.SetNumZeroed(Size);
+			for (int32 I = 0; I < N; ++I)
+			{
+				if (LitMask[I]) { ++Cols[I % Size]; ++Rows[I / Size]; }
+			}
+			auto Percentile = [Lit](const TArray<int32>& Counts, double Fraction)
+			{
+				const int32 Target = (int32)(Fraction * Lit);
+				int32 Sum = 0;
+				for (int32 I = 0; I < Counts.Num(); ++I)
+				{
+					Sum += Counts[I];
+					if (Sum > Target) { return I; }
+				}
+				return Counts.Num() - 1;
+			};
+			X0 = Percentile(Cols, 0.25); X1 = Percentile(Cols, 0.75);
+			Y0 = Percentile(Rows, 0.25); Y1 = Percentile(Rows, 0.75);
+		}
+		else
+		{
+			for (const FBlob& B : Blobs)
+			{
+				if (Inside * 5 >= Lit * 4) { break; } // 80% of the lit pixels reached
+				X0 = FMath::Min(X0, B.X0); Y0 = FMath::Min(Y0, B.Y0); X1 = FMath::Max(X1, B.X1); Y1 = FMath::Max(Y1, B.Y1);
+				Inside += B.Count;
+			}
+		}
 		bTouchesEdge = bEdge;
 		const double Inv = 2.0 / Size;
 		OutMin = FVector2D(X0 * Inv - 1.0, 1.0 - (Y1 + 1) * Inv);
@@ -785,6 +855,11 @@ void UBongThumbLiveFXRenderer::LogScenes() const
 			{
 				NiagaraAge = SI->GetAge();
 				NumEmitters = SI->GetEmitters().Num();
+				for (const FNiagaraEmitterInstanceRef& E : SI->GetEmitters())
+				{
+					UE_LOG(LogBongThumbLive, Display, TEXT("FXDebug   emitter %s: sim=%s state=%d particles=%d"), *E->GetEmitterHandle().GetName().ToString(),
+						E->GetSimTarget() == ENiagaraSimTarget::GPUComputeSim ? TEXT("GPU") : TEXT("CPU"), (int32)E->GetExecutionState(), E->GetNumParticles());
+				}
 			}
 		}
 		UE_LOG(LogBongThumbLive, Display, TEXT("FXDebug %s: registered=%d active=%d proxy=%d world=%d | niagara: exec=%d requested=%d complete=%d worldReady=%d controller=%d niagaraAge=%.2f emitters=%d | age=%.2f total=%.2f bounds=%s fit=%d"),

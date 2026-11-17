@@ -1,6 +1,6 @@
 > **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
-# BongThumbLive 2.3.0 (Unreal Engine 5.8 editor plugin)
+# BongThumbLive 2.3.1 (Unreal Engine 5.8 editor plugin)
 
 Live, looping Content Browser thumbnails:
 
@@ -9,6 +9,11 @@ Live, looping Content Browser thumbnails:
 | Animation Sequence / Montage / Composite | the clip plays in a loop on its preview mesh |
 | Material / Material Instance | Time / Panner / Sine driven nodes animate |
 | Niagara System, Cascade Particle System | the effect is simulated in a small preview world |
+
+## What's new in 2.3.1
+- **Effects with far-flung sparks fill the tile too.** Auto-framing groups the drawn pixels into blobs and frames the biggest blobs until 80% of the effect is inside, so a few sparks far from the flame no longer make it tiny (a torch whose sparks fall 25 m now shows its flame large). Evenly scattered effects (snow, rain, falling leaves) frame their densest middle half.
+- `BongThumbLive.FXDebug` lists every emitter (CPU/GPU, state, particle count); `BongThumbLive.FXLightBoost` brightens lit particles in effect tiles (default 1 = unchanged).
+- Known limit: small dark particles spread over many metres (some falling-leaf effects) can still look empty.
 
 ## What's new in 2.3.0
 - **Effect tiles fill the square.** Niagara and Cascade thumbnails are framed on what the effect actually draws, not on its bounds (Niagara bounds are often hand-set and far too large). The plugin renders the effect alone into a small image a few dozen times during its first seconds and fits the camera to the covered pixels (outlying sparks ignored), so the effect fills about 85% of the tile. `BongThumbLive.FXAutoFrame 0` restores the old framing; `BongThumbLive.FXAutoFrameFill` sets the share.
