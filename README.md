@@ -1,6 +1,6 @@
 > **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
-# BongThumbLive 2.2.2 (Unreal Engine 5.8 editor plugin)
+# BongThumbLive 2.3.0 (Unreal Engine 5.8 editor plugin)
 
 Live, looping Content Browser thumbnails:
 
@@ -9,6 +9,15 @@ Live, looping Content Browser thumbnails:
 | Animation Sequence / Montage / Composite | the clip plays in a loop on its preview mesh |
 | Material / Material Instance | Time / Panner / Sine driven nodes animate |
 | Niagara System, Cascade Particle System | the effect is simulated in a small preview world |
+
+## What's new in 2.3.0
+- **Effect tiles fill the square.** Niagara and Cascade thumbnails are framed on what the effect actually draws, not on its bounds (Niagara bounds are often hand-set and far too large). The plugin renders the effect alone into a small image a few dozen times during its first seconds and fits the camera to the covered pixels (outlying sparks ignored), so the effect fills about 85% of the tile. `BongThumbLive.FXAutoFrame 0` restores the old framing; `BongThumbLive.FXAutoFrameFill` sets the share.
+- **Live effects work again on UE 5.8.** Four 5.8 problems made live effect tiles empty or frozen; all are fixed:
+  - Niagara systems never opened in the session stayed on their static thumbnail: their deferred compile request was never started. The plugin now starts it.
+  - Ticking the preview world barely advanced Niagara (0.8 s of effect time per 9.7 s), so almost no particles existed. The plugin now advances the system directly when needed.
+  - The 5.8 thumbnail sky sphere (the checker backdrop) hid or washed out effects. Effect tiles now have no sky sphere and an opaque black background (`BongThumbLive.FXOpaqueBackground`).
+  - Particles were not sent to the render thread before a draw in the same frame.
+- The regression suite now checks that effect thumbnails actually show particles.
 
 ## What's new in 2.2.2
 - **More load slots.** The plugin may hold 24 animations at once while building caches (was 12; console variable `BongThumbLive.MaxLoadedAnims`). UE 5.8, 113-animation folder, empty cache: tiles appear after about 1.35 s on average (was about 1.55 s), the slowest after about 4 s (was 4.3-5.3 s). Peak editor memory was the same (1.9-2.0 GB). The preview-mesh cap is unchanged.
@@ -41,7 +50,7 @@ Live, looping Content Browser thumbnails:
 - The cache section of the settings page shows the cache folder, an "open folder" button and a "clear cache" (캐시 비우기) button.
 
 ## Install
-Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Engine>/Plugins/Marketplace/` (every project on that engine) and restart the editor. The source targets UE 5.8 (`EngineVersion 5.8.0`). The v2.2.x release zips contain prebuilt Win64 binaries for UE 5.8; v2.1 is the last UE 5.7 build. To build from source, use `RunUAT BuildPlugin`.
+Copy the `BongThumbLive` folder into `<Project>/Plugins/` (one project) or `<Engine>/Plugins/Marketplace/` (every project on that engine) and restart the editor. The source targets UE 5.8 (`EngineVersion 5.8.0`). The v2.2.x and v2.3.x release zips contain prebuilt Win64 binaries for UE 5.8; v2.1 is the last UE 5.7 build. To build from source, use `RunUAT BuildPlugin`.
 
 ## Settings
 **Project Settings > Plugins > Bong Thumb Live**, or the gear icon in the Content Browser. The settings are saved per user for the whole engine (`EditorSettings`), so every project on the same engine shares them. Values saved per project by older builds are imported once. The frame cache stays per project.

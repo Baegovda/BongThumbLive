@@ -51,6 +51,14 @@ def tick(dt):
     if age>15 and not state['scrolled']:
         state['scrolled']=True
         unreal.SystemLibrary.execute_console_command(None,'BongThumbLive.ScrollBrowser 0.5')
+    # Live effect scenes render nothing in the engine frame that creates them: draw the effect fixtures on a few
+    # earlier frames so Rendering.AssetTypes measures warmed scenes (as the Content Browser does).
+    if 12 < age < 19 and int(age * 4) != state.get('fxwarm'):
+        state['fxwarm'] = int(age * 4)
+        for p in ('/Game/BTLRegression/BTL_Niagara.BTL_Niagara', '/Game/BTLRegression/BTL_Cascade.BTL_Cascade',
+                  '/Game/Props/PrecisionSniperRifle/Weapons/Rifle/Particles/PS_MuzzleSmoke.PS_MuzzleSmoke'):
+            if unreal.load_asset(p):
+                unreal.SystemLibrary.execute_console_command(None, 'BongThumbLive.DumpThumb %s %s 1 64' % (p, os.path.join(unreal.Paths.project_saved_dir(), 'BTLWarm.png').replace('\\', '/')))
     if age>18 and not state.get('scrolled2'):
         # UE 5.8 re-lays out the tile view after the size change and can drop the first scroll.
         state['scrolled2']=True

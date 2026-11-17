@@ -1,4 +1,4 @@
-// BongThumbLive - live material / Niagara / Cascade thumbnails.
+﻿// BongThumbLive - live material / Niagara / Cascade thumbnails.
 #pragma once
 
 #include "CoreMinimal.h"
@@ -55,12 +55,22 @@ class UBongThumbLiveFXRenderer : public UDefaultSizedThumbnailRenderer
 	/** Free effect scenes that have not been drawn for IdleSeconds (or all of them when IdleSeconds < 0). */
 	static void PruneAllScenes(double IdleSeconds);
 	static int32 GetNumLiveScenes();
+	/** Auto-framing cost (BongThumbLive.FXAutoFrame): calibration renders, average/max ms, samples used. */
+	static FString GetFramingStats();
+	/** Debug (BongThumbLive.FXDebug): log component/simulation state of every live effect scene. */
+	void LogScenes() const;
 
 private:
+	/** Render the effect alone into a small target and fit the camera to the pixels it covers (see the .cpp). */
+	void CalibrateFraming(FBongThumbLiveFXScene* Scene);
+
+	UPROPERTY(Transient)
+	TObjectPtr<class UTextureRenderTarget2D> CalibTarget;
+
 	UThumbnailRenderer* GetInner(const UObject* Object);
 	bool IsLive(const UObject* Object) const;
 	/** Live, fully loaded and (for Niagara) compiled: only then the effect is simulated, otherwise the stock renderer draws it. */
-	bool IsReadyToSimulate(UObject* Object) const;
+	bool IsReadyToSimulate(UObject* Object) const; // also flushes a pending Niagara compile request (see .cpp)
 	void PruneScenes(double IdleSeconds, int32 MaxScenes);
 
 	UPROPERTY(Transient)

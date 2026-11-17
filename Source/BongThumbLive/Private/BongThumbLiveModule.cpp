@@ -61,6 +61,10 @@
 #include "Particles/ParticleSystem.h"
 #include "Settings/ContentBrowserSettings.h"
 #include "ThumbnailRendering/ThumbnailManager.h"
+#include "CanvasTypes.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Misc/FileHelper.h"
+#include "TextureResource.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectHash.h"
@@ -216,7 +220,7 @@ FString FBongThumbLiveModule::GetRenderGovernorStats()
 {
 	return FString::Printf(TEXT("sceneRenders: %lld, rt %.2f ms each, allowance %d/frame (budget %.1f ms, max %d), deferred=%lld, waiting=%d earlyReleases=%lld | %s"),
 		GBongScenesRendered, GBongSceneRtMs.load(), GBongSceneAllowance, GBongSceneBudgetMs, GBongMaxScenesPerFrame, GBongScenesDeferred, GBongTilesWaiting ? 1 : 0, GBongEarlyReleases,
-		*UBongThumbLiveRenderer::GetFramingStats());
+		*(UBongThumbLiveRenderer::GetFramingStats() + TEXT(" | ") + UBongThumbLiveFXRenderer::GetFramingStats()));
 }
 
 float FBongThumbLiveModule::GetLoopTime(const UAnimSequenceBase* Anim)
@@ -663,6 +667,9 @@ void FBongThumbLiveModule::OnPoolThumbnail(const FAssetData& AssetData)
 	++VisibleQueuedSinceLog;
 }
 
+// Why live tiles were not refreshed: 0 unsafe/loading, 1 shaders compiling, 2 asset compiling, 3 no renderer.
+static int64 GBongSkipReasons[4] = { 0, 0, 0, 0 };
+
 bool FBongThumbLiveModule::IsRefreshableNow(UObject* Obj)
 {
 	// The pool falls back to the static package thumbnail (the stock checker-background image) whenever it is
@@ -670,22 +677,30 @@ bool FBongThumbLiveModule::IsRefreshableNow(UObject* Obj)
 	// accepting it (CanVisualizeAsset == false). Never ask in those cases so a live tile keeps its last frame.
 	if (!Obj || !IsObjectSafe(Obj))
 	{
+		++GBongSkipReasons[0];
 		return false;
 	}
 	if (GShaderCompilingManager && GShaderCompilingManager->IsCompiling())
 	{
+		++GBongSkipReasons[1];
 		return false;
 	}
 	if (const IInterface_AsyncCompilation* Async = Cast<IInterface_AsyncCompilation>(Obj))
 	{
 		if (Async->IsCompiling())
 		{
+			++GBongSkipReasons[2];
 			return false;
 		}
 	}
 	UThumbnailManager* Manager = UThumbnailManager::TryGet();
 	FThumbnailRenderingInfo* Info = Manager ? Manager->GetRenderingInfo(Obj) : nullptr;
-	return Info && Info->Renderer;
+	if (!(Info && Info->Renderer))
+	{
+		++GBongSkipReasons[3];
+		return false;
+	}
+	return true;
 }
 
 FSoftObjectPath FBongThumbLiveModule::TagToPath(const FString& TagString)
@@ -1423,11 +1438,11 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 			{
 				PerKind[(int32)GetKind(P.Value.Asset.Get())]++;
 			}
-			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: Container=%s Category=%s Section=%s | Enabled=%d HoverOnly=%d MaxFPS=%d AutoLoadVisibleFolder=%d Anim=%d Mat=%d Niagara=%d Cascade=%d | Folder='%s' queued=%d loaded=%d pending=%d inflight=%d | visible queued=%d loaded=%d pending=%d | tiles on screen=%d live=%d cap=%d skipped(not renderable)=%lld poolFailures=%lld | %s | hover='%s' HoverFPS=%d Mode=%d | tracked=%d (anim=%d mat=%d niagara=%d cascade=%d) fxScenes=%d"),
+			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: Container=%s Category=%s Section=%s | Enabled=%d HoverOnly=%d MaxFPS=%d AutoLoadVisibleFolder=%d Anim=%d Mat=%d Niagara=%d Cascade=%d | Folder='%s' queued=%d loaded=%d pending=%d inflight=%d | visible queued=%d loaded=%d pending=%d | tiles on screen=%d live=%d cap=%d skipped(not renderable)=%lld [unsafe %lld shaders %lld asset %lld noRenderer %lld] poolFailures=%lld | %s | hover='%s' HoverFPS=%d Mode=%d | tracked=%d (anim=%d mat=%d niagara=%d cascade=%d) fxScenes=%d"),
 				*S->GetContainerName().ToString(), *S->GetCategoryName().ToString(), *S->GetSectionName().ToString(),
 				S->bEnabled, S->IsContinuous() ? 0 : 1, S->MaxFPS, S->bAutoLoadVisibleFolder, S->bAnimateAnimations, S->bAnimateMaterials, S->bAnimateNiagara, S->bAnimateCascade,
 				*AutoLoadFolder, AutoLoadQueued, AutoLoadDone, PendingPackages.Num(), InFlightLoads, VisibleQueued, VisibleDone, VisiblePending.Num(),
-				VisibleTileCount, LastLiveCount, S->MaxRefreshPerTickCap, SkippedNotRefreshable, PoolRenderFailures, *UBongThumbLiveRenderer::GetCacheStats(),
+				VisibleTileCount, LastLiveCount, S->MaxRefreshPerTickCap, SkippedNotRefreshable, GBongSkipReasons[0], GBongSkipReasons[1], GBongSkipReasons[2], GBongSkipReasons[3], PoolRenderFailures, *UBongThumbLiveRenderer::GetCacheStats(),
 				HoveredAsset.IsValid() ? *HoveredAsset->GetName() : TEXT(""), S->HoverFPS, (int32)S->Mode, Tracked.Num(),
 				PerKind[1], PerKind[2], PerKind[3], PerKind[4], UBongThumbLiveFXRenderer::GetNumLiveScenes());
 			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.Status: liveActive=%d visibleViews=%d visibleAnimTiles=%d tilesAnnounced=%lld announcePending=%d newTileToShown(n=%lld avg=%.2fs max=%.2fs waiting=%d) FrameBudgetMs=%.1f avgDrawMs=%.2f renderMsThisFrame=%.2f | %s"),
@@ -1587,6 +1602,47 @@ void FBongThumbLiveModule::RegisterConsoleCommands()
 				}
 			}
 			UE_LOG(LogBongThumbLive, Display, TEXT("BongThumbLive.ScrollBrowser %s: %d view(s) scrolled"), *Arg, Scrolled);
+		}),
+		ECVF_Default));
+
+	ConsoleObjects.Add(CM.RegisterConsoleCommand(
+		TEXT("BongThumbLive.DumpThumb"),
+		TEXT("Debug: draw a loaded asset with its registered thumbnail renderer into a 256x256 target and save it as PNG (alpha kept); logs RGB/alpha coverage. Usage: BongThumbLive.DumpThumb /Game/Path/Asset C:/dir/out.png [draws] [size]"),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 2) { UE_LOG(LogBongThumbLive, Warning, TEXT("Usage: BongThumbLive.DumpThumb /Game/Path/Asset C:/dir/out.png [draws]")); return; }
+			UObject* Obj = FSoftObjectPath(Args[0]).ResolveObject();
+			if (!Obj) { Obj = FindObject<UObject>(nullptr, *Args[0]); }
+			FThumbnailRenderingInfo* Info = Obj ? UThumbnailManager::Get().GetRenderingInfo(Obj) : nullptr;
+			if (!Info || !Info->Renderer) { UE_LOG(LogBongThumbLive, Warning, TEXT("DumpThumb: %s not loaded or no renderer"), *Args[0]); return; }
+			const int32 Draws = Args.Num() > 2 ? FMath::Clamp(FCString::Atoi(*Args[2]), 1, 120) : 30;
+			const int32 Size = Args.Num() > 3 ? FMath::Clamp(FCString::Atoi(*Args[3]), 16, 1024) : 256;
+			UTextureRenderTarget2D* Target = NewObject<UTextureRenderTarget2D>();
+			Target->AddToRoot();
+			Target->InitCustomFormat(Size, Size, PF_B8G8R8A8, false);
+			Target->UpdateResourceImmediate(true);
+			FTextureRenderTargetResource* Resource = Target->GameThread_GetRenderTargetResource();
+			for (int32 i = 0; i < Draws; ++i) // several draws: live effects simulate between them
+			{
+				FCanvas Canvas(Resource, nullptr, FGameTime::GetTimeSinceAppStart(), GMaxRHIFeatureLevel);
+				Canvas.Clear(FLinearColor::Transparent);
+				Info->Renderer->Draw(Obj, 0, 0, Size, Size, Resource, &Canvas, false);
+				Canvas.Flush_GameThread();
+				FlushRenderingCommands();
+				FPlatformProcess::Sleep(1.0f / 30.0f);
+			}
+			TArray<FColor> Pixels;
+			if (Resource->ReadPixels(Pixels))
+			{
+				int64 Lit = 0, Opaque = 0;
+				for (const FColor& C : Pixels) { Lit += FMath::Max3(C.R, C.G, C.B) > 10 ? 1 : 0; Opaque += C.A > 128 ? 1 : 0; }
+				TArray64<uint8> Png;
+				FImageUtils::PNGCompressImageArray(Size, Size, TArrayView64<const FColor>(Pixels.GetData(), Pixels.Num()), Png);
+				FFileHelper::SaveArrayToFile(Png, *Args[1]);
+				UE_LOG(LogBongThumbLive, Display, TEXT("DumpThumb: %s renderer=%s lit=%.1f%% opaque=%.1f%% -> %s"), *Obj->GetName(), *Info->Renderer->GetClass()->GetName(),
+					100.0 * Lit / Pixels.Num(), 100.0 * Opaque / Pixels.Num(), *Args[1]);
+			}
+			Target->RemoveFromRoot();
 		}),
 		ECVF_Default));
 

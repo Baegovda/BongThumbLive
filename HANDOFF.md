@@ -24,6 +24,18 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## v2.3.0: Niagara/Cascade framing + 5.8 live-effect fixes (2026-11-18 ~01:20 KST)
+- Owner request (2026-11-17): Niagara thumbnails framed to fill the square. Released as v2.3.0, deployed to the engine copy (binaries .bak5 = v2.2.2 build; engine .uplugin .bak4 = 2.2.2).
+- **Auto-framing** (FXRenderer `CalibrateFraming`): the effect is rendered alone (`ShowOnlyPrimitives`) into a 256 px target; covered pixels (max channel > 32, 1st..99th percentile per axis, >= 12 lit) give a rectangle in the camera right/up plane; the union over up to 40 samples (0.1 s of sim time apart, at most 2 samples per engine frame across all effects) fixes the camera (fill 0.85). First sample: wide bounds camera then a refined zoom; later samples: one render around the current fit (wide fallback if cut). CVars `BongThumbLive.FXAutoFrame` (1), `FXAutoFrameFill` (0.85). Status line: `fxFraming: samples renders empty avg max niagaraCompilePolls directAdvances`. Measured 3-5 ms avg per sample (max ~10 ms, one 60 ms outlier).
+- **UE 5.8 live-effect bugs found and fixed** (live FX tiles were empty/static on 5.8 before this):
+  1. Niagara compile requests are deferred until `PollForCompilationComplete(true)`; only component activation flushes, so systems never opened stayed static. `IsReadyToSimulate` now flushes (throttled 0.5 s per system).
+  2. Preview-world ticks barely advance Niagara (0.8 s system age after 9.7 s). `Simulate` calls `AdvanceSimulation(1, Step)` when the world tick did not advance it (adaptive).
+  3. The 5.8 thumbnail sky sphere is the checker backdrop: FX scenes are created with `SetCreateSkySphere(false)` and the tile gets alpha forced to 1 (`DrawClearQuadAlpha`, CVar `BongThumbLive.FXOpaqueBackground`).
+  4. `World->SendAllEndOfFrameUpdates()` before each FX draw. A scene still renders nothing in the engine frame that creates it (harmless in the Content Browser); the regression runner warms FX fixtures on earlier frames.
+- Regression: `Rendering.AssetTypes` now requires visible particles (max lit >= 20 of 64x64 over 45 draws) and an opaque tile; optional real Cascade fixture PS_MuzzleSmoke. Suite 8/8 (BTL_Niagara 139 lit, PS_MuzzleSmoke 95). BTL_Cascade from the 5.8 factory has no emitters (visibility check skipped).
+- Verified in UE_VFX_58 (project-plugin copy, removed afterwards): Fireball, clouds, snow, stylized slashes fill their tiles (`Docs/fx_framing_ue58.png`). Known limits: effects with far-flung sparks (NS_Fire_Torch) stay small; leaf effects (Daisy/Dead/Green leaves) draw nothing in thumbnails both before and after (not investigated).
+- New tools: `Tools/btl_with_project_plugin.ps1` (test a package as a project plugin, refuses if an editor runs), `Tools/btl_fx_frame_test.py` (CB before/after shots), console commands `BongThumbLive.DumpThumb <asset> <png> [draws] [size]`, `BongThumbLive.FXDebug`, Status skip reasons `[unsafe shaders asset noRenderer]`. Launcher un-maximises before moving.
+
 ## v2.2.2 released (2026-11-16 ~20:10 KST)
 - Tag v2.2.2 = 2a91e0f, https://github.com/Baegovda/BongThumbLive/releases/tag/v2.2.2 (zip from %TEMP%\BongThumbLive_pkg222).
 - **MaxLoadedAnims** (new cvar `BongThumbLive.MaxLoadedAnims`, was a hard-coded 12): default 24. Cold A/B in the side-monitor test project, 113-anim folder, 2 runs each, avg / max new-tile-to-shown: 12: 1.65, 1.46 / 5.3, 4.3 s; 24: 1.32, 1.38 / 3.8, 4.2 s; 32: 1.25, 1.29 / 3.8, 4.0 s. Peak private memory 1.9-2.0 GB for all (launcher now prints peakPrivateGB). Default-build run: 1.40 / 4.5 s, ownedAnimRoots max 24. Preview-mesh cap 6 unchanged. The owner asked for this (raising the old fixed 12) on 2026-11-16.
@@ -106,7 +118,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 
 ## Repo / releases
 - v2.1 released: tag commit 9b3050e. main is at 9a69106 (PR #1 merged 2026-11-15).
-- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2 (UE 5.8).
+- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2, v2.3.0 (UE 5.8).
 
 ## Build
 - `"K:\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin -Plugin="C:\workspace\BongThumbLive\BongThumbLive.uplugin" -Package=C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_pkgN -TargetPlatforms=Win64 -Rocket`. BuildPlugin builds a HostProject copy, so it works while the editor runs. The repo `.uplugin` EngineVersion should match 5.8 first.
