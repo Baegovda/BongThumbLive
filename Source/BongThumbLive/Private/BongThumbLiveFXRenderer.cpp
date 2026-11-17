@@ -72,8 +72,9 @@ namespace BongThumbLiveFX
 	static constexpr int32 CalibSize = 256;
 	static constexpr int32 MaxCalibSamples = 40;     // samples over the first ~4 s of simulation: short flashes (slashes)
 	static constexpr double CalibInterval = 0.1;     // simulated seconds between samples
-	static constexpr int32 MaxCalibPerFrame = 2;     // calibration samples per engine frame, all effects together
-	static int64 GCalibRenders = 0, GCalibSamples = 0, GCalibEmpty = 0, GCompilePolls = 0, GDirectAdvances = 0, GParticleFits = 0;
+	static constexpr int32 MaxCalibPerFrame = 1;     // refinement samples per engine frame, all effects together
+	static constexpr int32 MaxFirstCalibPerFrame = 3; // first samples (no fit yet) per engine frame
+	static int64 GCalibRenders = 0, GCalibSamples = 0, GCalibEmpty = 0, GCompilePolls = 0, GDirectAdvances = 0, GParticleFits = 0, GParticleRejects = 0;
 	static double GCalibMsTotal = 0.0, GCalibMsMax = 0.0;
 }
 
@@ -353,6 +354,7 @@ public:
 	int32 CalibSamples = 0;
 	double NextCalibTime = 0.0;
 	bool bParticleFit = false; // framing follows CPU particle positions (scattered effects)
+	uint64 CreatedFrame = 0;   // GFrameCounter when created (nothing renders in that frame)
 
 	/** World positions of all live particles of CPU Niagara emitters. False if the effect has no CPU particles. */
 	bool GetCpuParticlePositions(TArray<FVector>& Out) const
@@ -557,6 +559,7 @@ void UBongThumbLiveFXRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Wi
 	if (!Scene)
 	{
 		Scene = new FBongThumbLiveFXScene(Object);
+		Scene->CreatedFrame = GFrameCounter;
 	}
 	FBongThumbLiveFXScene* S = Scene; // the map may rehash in PruneScenes below
 
@@ -590,14 +593,29 @@ void UBongThumbLiveFXRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Wi
 	}
 	// At most MaxCalibPerFrame samples per engine frame across all effects (each is a small render + GPU readback),
 	// so a folder full of new effects spreads its calibration over many frames instead of hitching.
+	// Effects still without a usable fit (first samples) get their own budget, so in a big folder the tiles drawn first
+	// cannot take every sample while later tiles never get a fit (measured: 150 slashes, most never calibrated).
 	static uint64 CalibFrame = 0;
-	static int32 CalibThisFrame = 0;
-	if (CalibFrame != GFrameCounter) { CalibFrame = GFrameCounter; CalibThisFrame = 0; }
+	static int32 FirstThisFrame = 0, RefineThisFrame = 0;
+	if (CalibFrame != GFrameCounter) { CalibFrame = GFrameCounter; FirstThisFrame = 0; RefineThisFrame = 0; }
+	const bool bFirstSamples = S->CalibSamples < 3;
+	int32& Budget = bFirstSamples ? FirstThisFrame : RefineThisFrame;
+	const int32 BudgetMax = bFirstSamples ? BongThumbLiveFX::MaxFirstCalibPerFrame : BongThumbLiveFX::MaxCalibPerFrame;
 	if (BongThumbLiveFX::GAutoFrame && S->CalibSamples < BongThumbLiveFX::MaxCalibSamples && S->TotalSimTime >= S->NextCalibTime
-		&& CalibThisFrame < BongThumbLiveFX::MaxCalibPerFrame)
+		&& Budget < BudgetMax && S->CreatedFrame != GFrameCounter)
 	{
-		++CalibThisFrame;
+		++Budget;
 		CalibrateFraming(S);
+	}
+	if (S->CreatedFrame == GFrameCounter)
+	{
+		// A preview scene renders nothing in the engine frame that created it (measured: black tile). Show the stock
+		// thumbnail for this one draw; the live effect takes over from the next frame.
+		if (UThumbnailRenderer* R = GetInner(Object))
+		{
+			R->Draw(Object, X, Y, Width, Height, RenderTarget, Canvas, bAdditionalViewFamily);
+		}
+		return;
 	}
 
 	FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(RenderTarget, S->GetScene(), FEngineShowFlags(ESFIM_Game))
@@ -642,7 +660,7 @@ void UBongThumbLiveFXRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Wi
 namespace BongThumbLiveFX
 {
 	/** Covered-pixel rectangle in NDC (-1..1, +Y up). False if nothing was drawn. bTouchesEdge: cut by the view. */
-	static bool CoveredRect(const TArray<FColor>& Pixels, int32 Size, FVector2D& OutMin, FVector2D& OutMax, bool& bTouchesEdge, bool* bOutScattered = nullptr)
+	static bool CoveredRect(const TArray<FColor>& Pixels, int32 Size, FVector2D& OutMin, FVector2D& OutMax, bool& bTouchesEdge, bool* bOutScattered = nullptr, int32* OutLit = nullptr)
 	{
 		// Lit pixels (above the dither/grain noise of an empty view, measured up to ~13) grouped into blobs (8-neighbour,
 		// gaps of up to 2 px bridged). The rectangle covers the biggest blobs until 80% of the lit pixels are inside, so a
@@ -664,6 +682,7 @@ namespace BongThumbLiveFX
 				bEdge |= X == 0 || Y == 0 || X == Size - 1 || Y == Size - 1;
 			}
 		}
+		if (OutLit) { *OutLit = Lit; }
 		if (Lit < 12)
 		{
 			return false; // nothing (or a few stray pixels) drawn
@@ -777,6 +796,7 @@ void UBongThumbLiveFXRenderer::CalibrateFraming(FBongThumbLiveFXScene* S)
 	// One render of the effect alone from (Center, Zoom); returns its covered rectangle in plane units around Center.
 	FVector Right = S->FitRight, Up = S->FitUp, Dir = S->FitDir;
 	bool bLastScattered = false;
+	int32 LastLit = 0;
 	auto Measure = [&](const FVector& Center, double Zoom, FVector2D& OutMin, FVector2D& OutMax, bool& bEdge) -> bool
 	{
 		S->bCalibCamera = true;
@@ -808,7 +828,8 @@ void UBongThumbLiveFXRenderer::CalibrateFraming(FBongThumbLiveFXScene* S)
 		++GCalibRenders;
 		FVector2D NdcMin, NdcMax;
 		bLastScattered = false;
-		if (!bRead || !CoveredRect(Pixels, CalibSize, NdcMin, NdcMax, bEdge, &bLastScattered))
+		LastLit = 0;
+		if (!bRead || !CoveredRect(Pixels, CalibSize, NdcMin, NdcMax, bEdge, &bLastScattered, &LastLit))
 		{
 			return false;
 		}
@@ -898,7 +919,21 @@ void UBongThumbLiveFXRenderer::CalibrateFraming(FBongThumbLiveFXScene* S)
 	if (!bA || bLastScattered)
 	{
 		FVector2D PMin, PMax;
-		if (ParticleWindow(PMin, PMax))
+		bool bUseParticles = ParticleWindow(PMin, PMax);
+		if (bUseParticles)
+		{
+			// Check that the particle window actually shows something: for thousands of soft sprites (sand dust) the
+			// nearest-particles window can zoom into the empty space between them (measured: tiles went black).
+			FVector PCenter;
+			double PZoom;
+			CameraFor(PMin, PMax, Depth, 0.85, PCenter, PZoom);
+			FVector2D VMin, VMax;
+			bool bEdgeV = false;
+			Measure(PCenter, PZoom, VMin, VMax, bEdgeV);
+			bUseParticles = LastLit >= CalibSize * CalibSize / 300; // at least ~0.3% of the view lit
+			if (!bUseParticles) { ++GParticleRejects; }
+		}
+		if (bUseParticles)
 		{
 			++GParticleFits;
 			S->bParticleFit = true;
@@ -985,8 +1020,8 @@ void UBongThumbLiveFXRenderer::LogScenes() const
 FString UBongThumbLiveFXRenderer::GetFramingStats()
 {
 	using namespace BongThumbLiveFX;
-	return FString::Printf(TEXT("fxFraming: auto=%d samples=%lld renders=%lld empty=%lld avg=%.2f ms max=%.2f ms niagaraCompilePolls=%lld directAdvances=%lld particleFits=%lld"), GAutoFrame, GCalibSamples, GCalibRenders,
-		GCalibEmpty, GCalibSamples ? GCalibMsTotal / GCalibSamples : 0.0, GCalibMsMax, GCompilePolls, GDirectAdvances, GParticleFits);
+	return FString::Printf(TEXT("fxFraming: auto=%d samples=%lld renders=%lld empty=%lld avg=%.2f ms max=%.2f ms niagaraCompilePolls=%lld directAdvances=%lld particleFits=%lld particleRejects=%lld"), GAutoFrame, GCalibSamples, GCalibRenders,
+		GCalibEmpty, GCalibSamples ? GCalibMsTotal / GCalibSamples : 0.0, GCalibMsMax, GCompilePolls, GDirectAdvances, GParticleFits, GParticleRejects);
 }
 
 void UBongThumbLiveFXRenderer::PruneScenes(double IdleSeconds, int32 MaxScenes)

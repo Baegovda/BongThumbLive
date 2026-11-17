@@ -1,6 +1,6 @@
 > **For AI agents: read [HANDOFF.md](HANDOFF.md) first.** It has a Fresh environment setup (connect Baegovda's PC "Revaptor-FX", GitHub access, tools), local paths, build/test/push steps, standing rules, the current step and a Resume checklist. Do not rely on any agent-side files; this repo is the source of truth. Reply to the user in short Korean (해요체).
 
-# BongThumbLive 2.3.2 (Unreal Engine 5.8 editor plugin)
+# BongThumbLive 2.3.3 (Unreal Engine 5.8 editor plugin)
 
 Live, looping Content Browser thumbnails:
 
@@ -9,6 +9,11 @@ Live, looping Content Browser thumbnails:
 | Animation Sequence / Montage / Composite | the clip plays in a loop on its preview mesh |
 | Material / Material Instance | Time / Panner / Sine driven nodes animate |
 | Niagara System, Cascade Particle System | the effect is simulated in a small preview world |
+
+## What's new in 2.3.3
+- **Dense soft effects stay visible.** The particle-position framing from 2.3.2 is now checked with one render before use; if the view would show almost nothing (thousands of soft sand-dust sprites), the pixel framing is kept. Sand dust tiles that went black in 2.3.2 are large again.
+- **Big effect folders get framed quickly.** Effects without a fit yet get their own calibration budget (3 per frame; refinement 1 per frame), so in a folder of 150 effects the tiles drawn first no longer take all samples.
+- **No black first frame.** A new effect scene renders nothing in the frame that creates it; that one draw now shows the stock thumbnail.
 
 ## What's new in 2.3.2
 - **Falling leaves and other scattered effects show up.** When an effect draws too few pixels to measure, or only scattered specks (leaves, petals, dust spread over many metres), the camera is fitted to the particle positions of its CPU emitters: around the middle of the particles, wide enough to hold the nearest eighth of them (8-40). Leaf effects that looked empty now show their leaves in the tile.

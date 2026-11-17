@@ -24,6 +24,13 @@ The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the
 - Engine-wide config backups before the tests: `%TEMP%\btl_EditorSettings_before_test58.ini`, `%TEMP%\btl_EditorLayout_before_test58.ini`. Afterwards only the recent-projects list differed (left as is; another worker's GravityCheck project also writes it).
 - Another worker runs `UnrealEditor-Cmd` on `K:\SM2_Backups\Gravity09Isolated\GravityCheck.uproject` (ForgeLens). It does not load BongThumbLive; do not touch it. Before deploying, check that no running editor has the plugin dll loaded.
 
+## v2.3.3 (2026-11-18 ~03:30 KST)
+- Survey of 7 more effect folders in UE_VFX_58 (Base/Particle, MagicalSlashes, DeathEffects_Vol2, Sandstorm, Signal_Flares, TransformationVFX, DashEffects; shots were in %TEMP%tl_shotsxsurvey*). Found: (1) 2.3.2's particle-position fit made Sandstorm NS_DustParticles_01-08 black (thousands of soft sprites, nearest-particle window between them). Fix: validate the particle window with one render, require >= 0.3% of the 256 px view lit, else keep the pixel fit (`particleRejects=`). (2) Big folders starved: the first-drawn tiles took all samples. Fix: separate per-frame budgets, 3 for effects with < 3 samples, 1 for refinement.
+- First frame: `CreatedFrame`; the creation-frame draw uses the stock renderer (no black tile) and skips calibration.
+- Rain/dust diagnosis: NS_Hard_Rain/Soft_Rain/Rain_Drop/Dust_Grains/Volume_Fog are CPU emitters with thin low-opacity streaks / tiny grains / faint fog; they are faint by nature (max brightness 95-156, fog 13). Left as is.
+- Remaining observations: MagicalSlashes blades travel across the view, so the union of their path stays wide (small blade). One-shot DeathEffects vary by capture moment. VFX/Base/Particle tiles mostly showed saved thumbnails in the 40 s window (234 items).
+- Suite 8/8 (BTL_Niagara 529 lit, PS_MuzzleSmoke 306).
+
 ## v2.3.2: leaves via particle positions (2026-11-18 ~02:50 KST)
 - When the pixel calibration finds nothing (< 12 lit) or a scattered effect (biggest blob < 25%), `CalibrateFraming` uses CPU particle positions (`FNiagaraDataSetAccessor<FNiagaraPosition>` on each CPU emitter's `GetParticleData()`, after `WaitForConcurrentTickDoNotFinalize`; local-space emitters transformed by the component): window around the per-axis median, half-size = Chebyshev distance of the K-th nearest particle (K = n/8 clamped 8..40) x1.15. Once an effect uses this (`bParticleFit`), later samples skip the render. Status: `particleFits=`.
 - Verified in UE_VFX_58 (Environment_VFX_Pack): Daisy/Dead/Green/Judas/Sakura leaves now show leaves in their tiles; clouds, snow, fire torch, magic sparks/torch, lightning unchanged. Rain/Dust grains stay faint (GPU or very small). Suite 8/8.
@@ -129,7 +136,7 @@ BongThumbLive is a UE 5.7/5.8 **editor-only** plugin (Win64) that makes Content 
 
 ## Repo / releases
 - v2.1 released: tag commit 9b3050e. main is at 9a69106 (PR #1 merged 2026-11-15).
-- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2, v2.3.0, v2.3.1, v2.3.2 (UE 5.8).
+- **Release without asking** (owner, 2026-11-16: "릴리즈하고 담부턴 묻지마"): when a tested improvement is on main, bump VersionName/Version, tag, publish a GitHub release with the Win64 zip (dll + modules + Source + Config + README, no pdb), then report. Releases: v2.1 (UE 5.7), v2.2, v2.2.1, v2.2.2, v2.3.0, v2.3.1, v2.3.2, v2.3.3 (UE 5.8).
 
 ## Build
 - `"K:\Epic Games\UE_5.8\Engine\Build\BatchFiles\RunUAT.bat" BuildPlugin -Plugin="C:\workspace\BongThumbLive\BongThumbLive.uplugin" -Package=C:\Users\Revaptor_FX\AppData\Local\Temp\BongThumbLive_pkgN -TargetPlatforms=Win64 -Rocket`. BuildPlugin builds a HostProject copy, so it works while the editor runs. The repo `.uplugin` EngineVersion should match 5.8 first.
