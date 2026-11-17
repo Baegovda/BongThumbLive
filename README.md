@@ -10,6 +10,11 @@ Live, looping Content Browser thumbnails:
 | Material / Material Instance | Time / Panner / Sine driven nodes animate |
 | Niagara System, Cascade Particle System | the effect is simulated in a small preview world |
 
+## What's new in 2.3.4
+- **Crash fix (UE 5.8 Substrate).** Opening some effect folders crashed the editor ("CurrentMaxBytesPerPixel (28) exceeds PlatformSettingsBytesPerPixel (20)") as soon as their effects were drawn live; saved effect thumbnails had never drawn those materials. The plugin now renders its effect tiles with `r.Substrate.AllocationMode 2` (switched only around its own renders; other views keep your setting). `BongThumbLive.FXSafeSubstrate 0` turns this off.
+- Effects whose materials report a Substrate size over the platform budget are shown with their saved thumbnail instead of live (`substrateSkips` in Status).
+- Debug: `BongThumbLive.FXTrace 1` logs every live effect render and its materials' Substrate size.
+
 ## What's new in 2.3.3
 - **Dense soft effects stay visible.** The particle-position framing from 2.3.2 is now checked with one render before use; if the view would show almost nothing (thousands of soft sand-dust sprites), the pixel framing is kept. Sand dust tiles that went black in 2.3.2 are large again.
 - **Big effect folders get framed quickly.** Effects without a fit yet get their own calibration budget (3 per frame; refinement 1 per frame), so in a folder of 150 effects the tiles drawn first no longer take all samples.
