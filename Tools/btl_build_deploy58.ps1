@@ -21,6 +21,11 @@ $r
 if (-not ($r -match 'BUILD SUCCESSFUL')) { throw "build failed, see $Log" }
 }
 if ($NoDeploy) { return }
+# Since 2026-11-18 the plugin ships inside BongToolbox (Marketplace\BongToolbox, module BongThumbLive). A separate
+# Marketplace\BongThumbLive would clash with that module, so deploy through the BongToolbox package instead.
+if (Test-Path 'K:\Epic Games\UE_5.8\Engine\Plugins\Marketplace\BongToolbox\BongToolbox.uplugin') {
+	throw "BongThumbLive now lives in BongToolbox; build C:\Users\Revaptor_FX\Desktop\BongToolbox\BongToolbox.uplugin instead (built package kept at $Out)"
+}
 foreach ($pp in Get-Process UnrealEditor* -ErrorAction SilentlyContinue) {
 	if ($pp.Modules | Where-Object ModuleName -like '*BongThumbLive*') { throw "plugin dll in use by pid $($pp.Id)" }
 }

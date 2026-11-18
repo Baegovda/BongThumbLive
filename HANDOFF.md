@@ -2,6 +2,11 @@
 
 Last update: 2026-11-18 KST (Asia/Seoul). Current release: v2.3.5 (deployed to the engine copy).
 
+## Moved into BongToolbox (2026-11-18, done by the BongToolbox session on the owner's request) — READ FIRST
+- Installed copy is now `K:\Epic Games\UE_5.8\Engine\Plugins\Marketplace\BongToolbox` (modules BongThumbLive, BongLodge, BongRealMCP, BongToolbox). The old `Marketplace\BongThumbLive` folder was removed.
+- Source there: `C:\Users\Revaptor_FX\Desktop\BongToolbox\Source\BongThumbLive` (= this repo at f47e991 plus: settings under Project Settings > BongToolbox > ThumbLive, config section `[/Script/BongThumbLive.BongThumbLiveSettings]` unchanged; the Content Browser gear runs `BongToolbox.Open ThumbLive`; `BongThumbLive.OpenSettings` opens that section).
+- **Do not deploy with `Tools/btl_build_deploy58.ps1`**: a second `Marketplace\BongThumbLive` would clash with the module of the same name. The script now refuses when BongToolbox is installed. Build/deploy the BongToolbox package (`RunUAT BuildPlugin -Plugin=C:\Users\Revaptor_FX\Desktop\BongToolbox\BongToolbox.uplugin` with a short `-Package` path). Port any change made in this repo to the BongToolbox source as well.
+
 ## Current environment (2026-11-16) — READ FIRST
 The PC moved from UE 5.7 to **UE 5.8**. Every `UE_5.7` / `UE_VFX_57` path in the History sections below is **stale** (those folders no longer exist). Use these instead:
 - Engine: `K:\Epic Games\UE_5.8` (editor `Engine\Binaries\Win64\UnrealEditor.exe`, RunUAT `Engine\Build\BatchFiles\RunUAT.bat`).
